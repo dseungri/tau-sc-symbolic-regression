@@ -1,0 +1,2 @@
+roi_index_zero_based,roi_index_one_based,roi_name,hemisphere,atlas,atlas_version,source_label,included,verification_status
+0,1,syn_roi_001,left,Destrieux,UNSET,Synthetic ROI 001,true,pending

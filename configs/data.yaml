@@ -1,0 +1,14 @@
+incoming_dir: data/00_incoming_readonly
+inventory_dir: data/01_inventory
+interim_dir: data/02_interim
+processed_dir: data/03_processed
+split_dir: data/04_splits
+subject_id_column: subject_id
+visit_id_column: visit_id
+visit_date_column: scan_date
+time_from_baseline_column: time_from_baseline_years
+roi_name_column: roi_name
+tau_value_column: tau_value
+accepted_tau_extensions: [".csv", ".tsv"]
+accepted_matrix_extensions: [".csv", ".tsv", ".npy", ".npz"]
+allow_real_data_logging: false

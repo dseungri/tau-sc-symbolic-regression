@@ -1,0 +1,2 @@
+subject_id,visit_id,modality,scan_date,time_from_baseline_years,tau_file,dwi_file,count_matrix_file,fa_matrix_file,length_matrix_file,roi_label_file,tau_qc_status,connectome_qc_status,eligibility_status,exclusion_reason,notes
+sub-syn001,visit-01,tau_pet,2026-01-01,0.0,synthetic_tau.csv,synthetic_dwi_placeholder,count.csv,fa.csv,length.csv,roi_labels.csv,pending,pending,pending,,synthetic example only

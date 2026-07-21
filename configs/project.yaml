@@ -1,0 +1,7 @@
+project_name: Subject-Specific Structural Connectome Representation and Symbolic Discovery of Tau Reaction Laws
+atlas: Destrieux
+expected_roi_count: 148
+time_unit: years
+random_seed: 20260721
+restricted_data: true
+data_root_env: TAU_SR_DATA_ROOT

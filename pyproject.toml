@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tau-sc-symbolic-regression"
+version = "0.1.0"
+description = "Pre-data infrastructure for subject-specific structural connectome tau progression modeling."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNSET" }
+authors = [{ name = "UNSET" }]
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "matplotlib",
+  "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "mypy",
+]
+imaging = [
+  "nibabel",
+  "pyarrow",
+]
+ml = [
+  "torch",
+  "torchdiffeq",
+]
+symbolic = [
+  "pysr",
+]
+
+[project.scripts]
+tau-sr = "tau_sr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["tau_sr"]
+strict = false
+warn_unused_ignores = true
+ignore_missing_imports = true

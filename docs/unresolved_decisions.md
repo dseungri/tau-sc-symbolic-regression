@@ -1,0 +1,21 @@
+# Unresolved Decisions
+
+- Exact tau tracer.
+- SUVR reference region.
+- Partial-volume-correction status.
+- Whether tau is supplied raw or normalized.
+- Healthy-baseline availability.
+- Carrying-capacity availability.
+- Exact DWI processing pipeline.
+- Definition of streamline density.
+- Definition of edge-level FA.
+- Tract-length units.
+- Adjacency scaling convention.
+- Primary Laplacian convention.
+- DWI-to-baseline-PET timing threshold.
+- Exact cohort size.
+- Availability of two versus three or more PET visits.
+- Missing-data thresholds.
+- Whether processed matrices or raw DWI will be supplied.
+- Approved computing/storage environment.
+- Final train/validation/test strategy.

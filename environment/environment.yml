@@ -1,0 +1,17 @@
+name: tau-sc-symbolic-regression
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  - pytest
+  - ruff
+  - mypy
+  - pip:
+      - -e .[imaging]

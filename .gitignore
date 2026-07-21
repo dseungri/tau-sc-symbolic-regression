@@ -1,0 +1,95 @@
+# Environments and local config
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+.python-version
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and generated local outputs
+logs/**
+!logs/
+!logs/README.md
+!logs/.gitkeep
+results/**/*.csv
+results/**/*.json
+results/**/*.png
+reports/**/*.json
+reports/**/*.html
+reports/**/*.png
+reports/generated/**
+
+# Restricted and subject-level data
+data/00_incoming_readonly/**
+data/01_inventory/**
+data/02_interim/**
+data/03_processed/**
+data/04_splits/**
+data/05_synthetic/**
+!data/**/
+!data/**/README.md
+!data/**/.gitkeep
+
+# Imaging and archives
+*.nii
+*.nii.gz
+*.dcm
+*.dicom
+*.bval
+*.bvec
+*.trk
+*.tck
+*.mgz
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Matrices, tables, checkpoints, and model artifacts
+*.npy
+*.npz
+*.parquet
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.joblib
+*.pkl
+*.pickle
+models/**/*.*
+!models/**/
+!models/README.md
+!models/**/.gitkeep
+
+# Julia and PySR generated state
+Manifest.toml
+Project.toml
+pysr_tmp/
+juliaup/
+
+# Credentials and local overrides
+*credentials*
+*secret*
+*token*
+configs/*local*.yaml
+configs/*override*.yaml

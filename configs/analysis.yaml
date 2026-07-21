@@ -1,0 +1,6 @@
+active: false
+primary_question: Does the definition of a subject-specific DWI-derived structural network alter held-out tau-PET prediction accuracy or the form and stability of the symbolically discovered local reaction law?
+performance_metrics: UNSET
+statistical_comparison_plan: UNSET
+held_out_test_policy: do_not_use_for_preprocessing_or_model_selection
+biological_interpretation_status: not_started

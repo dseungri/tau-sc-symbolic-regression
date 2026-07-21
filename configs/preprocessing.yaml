@@ -1,0 +1,9 @@
+tau_state_definition: UNSET
+tau_reference_region: UNSET
+tau_tracer: UNSET
+partial_volume_correction: UNSET
+baseline_definition: UNSET
+carrying_capacity_definition: UNSET
+missing_tau_policy: mask
+clipping_policy: none
+dwi_pet_max_interval_years: UNSET
