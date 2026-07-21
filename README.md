@@ -1,19 +1,12 @@
 # Subject-Specific Structural Connectome Representation and Symbolic Discovery of Tau Reaction Laws (better title soon)
 
-## Scientific Model
+Scientific Model
 
 For subject `s`, brain region `i`, and structural-network representation `m`:
 
-```text
-dy_{s,i}/dt
-    = -rho_m (L_s^(m) y_s)_i
-      + r_{theta,m}(y_{s,i})
-```
-
 `y` is the regional tau-PET burden, `L_s^(m)` is a subject-specific DWI-derived graph Laplacian, `rho_m` is a transport coefficient, and `r_theta,m` is a compact neural representation of the local net reaction function. Symbolic regression fits `y -> r_theta(y)`
 
-## Repo Structure
-
+Repo Structure
 - `configs/`: documented YAML configuration with unresolved decisions marked `UNSET`.
 - `data/`: ignored local data staging directories with placeholder README files only.
 - `docs/`: governance, scientific, QC, and reproducibility protocols.
