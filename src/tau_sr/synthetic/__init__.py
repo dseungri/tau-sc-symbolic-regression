@@ -1,1 +1,0 @@
-"""Deterministic synthetic fixtures."""
