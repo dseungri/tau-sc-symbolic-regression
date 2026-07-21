@@ -1,5 +1,8 @@
 # Subject-Specific Structural Connectome Representation and Symbolic Regression of Tau Reaction Laws (better title soon...)
 
+**Authors:** Daniel [Chu] and Jacob [Lawson]
+**PI:** Dr. Guorong Wu
+
 Model
 For subject `s`, brain region `i`, and structural-network representation `m`:
 
