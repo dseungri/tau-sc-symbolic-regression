@@ -1,9 +1,0 @@
-primary_type: UNSET
-allowed_types:
-  - unnormalized
-  - symmetric_normalized
-sign_convention: negative_laplacian_transport
-eigenvalue_tolerance: 1.0e-8
-symmetry_tolerance: 1.0e-6
-require_transport_direction_test: true
-approval_note: Dr. Wu or the analysis lead must approve the primary Laplacian convention before real modeling.
