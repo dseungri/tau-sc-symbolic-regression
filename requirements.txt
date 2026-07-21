@@ -9,7 +9,8 @@ description = "Pre-data infrastructure for subject-specific structural connectom
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "UNSET" }
-authors = [{ name = "UNSET" }]
+authors = [{ name = "Daniel [Chu]", email = "thisisdchu@gmail.com" }, { name = "Jacob [Lawson]", email = "jacob.a.lawson06@gmail.com" } 
+]
 dependencies = [
   "numpy",
   "pandas",
