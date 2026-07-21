@@ -1,4 +1,0 @@
--r requirements-base.txt
-pytest
-ruff
-mypy

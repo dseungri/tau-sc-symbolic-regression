@@ -1,2 +1,0 @@
-# PySR may require a compatible Julia runtime. Do not install during setup without approval.
-pysr

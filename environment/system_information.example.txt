@@ -1,5 +1,0 @@
-Python: UNSET
-OS: UNSET
-CPU: UNSET
-RAM: UNSET
-Storage location approved for restricted data: UNSET
