@@ -1,66 +1,22 @@
-q[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+PyYAML
 
-[project]
-name = "tau-sc-symbolic-regression"
-version = "0.1.0"
-description = "Pre-data infrastructure for subject-specific structural connectome tau progression modeling."
-readme = "README.md"
-requires-python = ">=3.11"
-license = { text = "UNSET" }
-authors = [{ name = "Daniel [Chu]", email = "thisisdchu@gmail.com" }, { name = "Jacob [Lawson]", email = "jacob.a.lawson06@gmail.com" } 
-]
-dependencies = [
-  "numpy",
-  "pandas",
-  "scipy",
-  "scikit-learn",
-  "matplotlib",
-  "PyYAML",
-]
+# Development
+pytest
+ruff
+mypy
 
-[project.optional-dependencies]
-dev = [
-  "pytest",
-  "ruff",
-  "mypy",
-]
-imaging = [
-  "nibabel",
-  "pyarrow",
-]
-ml = [
-  "torch",
-  "torchdiffeq",
-]
-symbolic = [
-  "pysr",
-]
+# imaging/data IO
+nibabel
+pyarrow
 
-[project.scripts]
-tau-sr = "tau_sr.cli:main"
+# Neural ODE modeling
+torch>=2.13.0
+torchdiffeq
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-minversion = "8.0"
-addopts = "-q"
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-src = ["src", "tests", "scripts"]
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
-ignore = []
-
-[tool.mypy]
-python_version = "3.11"
-packages = ["tau_sr"]
-strict = false
-warn_unused_ignores = true
-ignore_missing_imports = true
+# Symbolic regression
+pysr
