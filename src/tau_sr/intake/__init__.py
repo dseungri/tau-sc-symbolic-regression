@@ -1,1 +1,0 @@
-"""Secure data-intake utilities."""
