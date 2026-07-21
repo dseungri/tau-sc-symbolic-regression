@@ -36,6 +36,18 @@ class ConnectomeBundle:
     fa: NDArray[np.float64]
     length: NDArray[np.float64]
 
+    def __post_init__(self) -> None:
+        """Copy matrices into read-only arrays despite the frozen dataclass wrapper."""
+
+        object.__setattr__(self, "subject_id", _require_string(self.subject_id, "subject_id"))
+        object.__setattr__(self, "roi_labels", _coerce_roi_labels(self.roi_labels))
+        for name in CONNECTOME_MATRIX_NAMES:
+            object.__setattr__(
+                self,
+                name,
+                _readonly_float64_array(getattr(self, name), matrix_name=name),
+            )
+
     @property
     def n_rois(self) -> int:
         """Number of ROI labels represented by this bundle."""
@@ -85,6 +97,9 @@ def validate_tau_table(
             f"{examples.to_dict('records')}"
         )
 
+    if require_complete_visits and expected_n_rois is None:
+        raise SchemaError("expected_n_rois is required when require_complete_visits is true.")
+
     if expected_n_rois is not None:
         if expected_n_rois <= 0:
             raise SchemaError("expected_n_rois must be positive when provided.")
@@ -107,25 +122,20 @@ def validate_tau_table(
 def connectome_bundle_from_mapping(mapping: Mapping[str, object]) -> ConnectomeBundle:
     """Convert raw dict-like input into standard ConnectomeBundle object"""
 
+    if not isinstance(mapping, Mapping):
+        raise SchemaError("Connectome bundle input must be a mapping.")
+
     required_keys = ("subject_id", "roi_labels", *CONNECTOME_MATRIX_NAMES)
     missing = [key for key in required_keys if key not in mapping]
     if missing:
         raise SchemaError(f"Connectome bundle missing required key(s): {', '.join(missing)}")
 
-    roi_labels_raw = mapping["roi_labels"]
-    if isinstance(roi_labels_raw, str):
-        raise SchemaError("roi_labels must be a sequence of labels, not a single string.")
-    try:
-        roi_labels = tuple(str(label) for label in roi_labels_raw)  # type: ignore[union-attr]
-    except TypeError as exc:
-        raise SchemaError("roi_labels must be an iterable sequence of labels.") from exc
-
     return ConnectomeBundle(
-        subject_id=str(mapping["subject_id"]),
-        roi_labels=roi_labels,
-        count=np.asarray(mapping["count"], dtype=float),
-        fa=np.asarray(mapping["fa"], dtype=float),
-        length=np.asarray(mapping["length"], dtype=float),
+        subject_id=_require_string(mapping["subject_id"], "subject_id"),
+        roi_labels=_coerce_roi_labels(mapping["roi_labels"]),
+        count=_readonly_float64_array(mapping["count"], matrix_name="count"),
+        fa=_readonly_float64_array(mapping["fa"], matrix_name="fa"),
+        length=_readonly_float64_array(mapping["length"], matrix_name="length"),
     )
 
 
@@ -139,22 +149,25 @@ def validate_connectome_bundle(
     if not isinstance(bundle, ConnectomeBundle):
         bundle = connectome_bundle_from_mapping(bundle)
 
-    if not bundle.subject_id.strip():
+    subject_id = _require_string(bundle.subject_id, "subject_id")
+    roi_labels = _coerce_roi_labels(bundle.roi_labels)
+
+    if not subject_id.strip():
         raise SchemaError("Connectome bundle subject_id is empty.")
-    if not bundle.roi_labels:
+    if not roi_labels:
         raise SchemaError("Connectome bundle has no roi_labels.")
-    if any(not label.strip() for label in bundle.roi_labels):
+    if any(not label.strip() for label in roi_labels):
         raise SchemaError("Connectome bundle contains empty ROI labels.")
 
     if expected_n_rois is not None:
         if expected_n_rois <= 0:
             raise SchemaError("expected_n_rois must be positive when provided.")
-        if bundle.n_rois != expected_n_rois:
+        if len(roi_labels) != expected_n_rois:
             raise SchemaError(
-                f"Connectome bundle has {bundle.n_rois} ROI labels; expected {expected_n_rois}."
+                f"Connectome bundle has {len(roi_labels)} ROI labels; expected {expected_n_rois}."
             )
 
-    duplicate_labels = find_duplicate_normalized_labels(bundle.roi_labels)
+    duplicate_labels = find_duplicate_normalized_labels(roi_labels)
     if duplicate_labels:
         raise SchemaError(
             "Connectome bundle contains duplicate normalized ROI label(s): "
@@ -162,10 +175,10 @@ def validate_connectome_bundle(
         )
 
     matrices = {
-        name: np.asarray(bundle.matrix(name), dtype=float)
+        name: _readonly_float64_array(bundle.matrix(name), matrix_name=name)
         for name in CONNECTOME_MATRIX_NAMES
     }
-    expected_shape = (bundle.n_rois, bundle.n_rois)
+    expected_shape = (len(roi_labels), len(roi_labels))
     for name, matrix in matrices.items():
         if matrix.shape != expected_shape:
             raise SchemaError(
@@ -175,8 +188,8 @@ def validate_connectome_bundle(
             raise SchemaError(f"{name} matrix contains nonfinite values.")
 
     return ConnectomeBundle(
-        subject_id=bundle.subject_id,
-        roi_labels=tuple(bundle.roi_labels),
+        subject_id=subject_id,
+        roi_labels=roi_labels,
         count=matrices["count"],
         fa=matrices["fa"],
         length=matrices["length"],
@@ -327,3 +340,34 @@ def _validate_reorder_map(
     if set(reorder_array.tolist()) != set(range(expected_length)):
         raise SchemaError("ROI reorder map must be a permutation of zero-based ROI indices.")
     return reorder_array
+
+
+def _require_string(value: object, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise SchemaError(f"{field_name} must be a string.")
+    return value
+
+
+def _coerce_roi_labels(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raise SchemaError("roi_labels must be a sequence of strings, not a single string.")
+    try:
+        labels = tuple(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise SchemaError("roi_labels must be an iterable sequence of strings.") from exc
+
+    if any(not isinstance(label, str) for label in labels):
+        raise SchemaError("roi_labels must contain only strings.")
+    return labels
+
+
+def _readonly_float64_array(values: object, *, matrix_name: str) -> NDArray[np.float64]:
+    try:
+        array = np.array(values, dtype=np.float64, copy=True)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise SchemaError(f"{matrix_name} matrix must contain numeric values.") from exc
+
+    if not np.isfinite(array).all():
+        raise SchemaError(f"{matrix_name} matrix contains nonfinite values.")
+    array.setflags(write=False)
+    return array

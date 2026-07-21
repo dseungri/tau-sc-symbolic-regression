@@ -71,6 +71,22 @@ def test_tau_table_can_require_complete_visits() -> None:
         validate_tau_table(table, expected_n_rois=2, require_complete_visits=True)
 
 
+def test_tau_table_requires_expected_roi_count_for_complete_visits() -> None:
+    table = pd.DataFrame(
+        {
+            "subject_id": ["s1"],
+            "visit_id": ["v1"],
+            "time_years": [0.0],
+            "roi_index": [0],
+            "roi_name": ["a"],
+            "tau_value": [1.0],
+        }
+    )
+
+    with pytest.raises(SchemaError, match="expected_n_rois"):
+        validate_tau_table(table, expected_n_rois=None, require_complete_visits=True)
+
+
 def test_connectome_bundle_from_mapping_and_validation_pass() -> None:
     matrix = np.array([[0.0, 2.0], [2.0, 0.0]])
     bundle = connectome_bundle_from_mapping(
@@ -88,6 +104,121 @@ def test_connectome_bundle_from_mapping_and_validation_pass() -> None:
     assert isinstance(checked, ConnectomeBundle)
     assert checked.subject_id == "s1"
     assert checked.n_rois == 2
+
+
+def test_connectome_bundle_rejects_non_mapping_input() -> None:
+    with pytest.raises(SchemaError, match="mapping"):
+        validate_connectome_bundle(["not", "a", "mapping"], expected_n_rois=2)  # type: ignore[arg-type]
+
+
+def test_connectome_bundle_rejects_non_string_subject_id() -> None:
+    matrix = np.zeros((2, 2))
+
+    with pytest.raises(SchemaError, match="subject_id"):
+        connectome_bundle_from_mapping(
+            {
+                "subject_id": 1,
+                "roi_labels": ["a", "b"],
+                "count": matrix,
+                "fa": matrix,
+                "length": matrix,
+            }
+        )
+
+
+def test_connectome_bundle_rejects_non_string_roi_labels() -> None:
+    matrix = np.zeros((2, 2))
+
+    with pytest.raises(SchemaError, match="roi_labels"):
+        connectome_bundle_from_mapping(
+            {
+                "subject_id": "s1",
+                "roi_labels": ["a", 1],
+                "count": matrix,
+                "fa": matrix,
+                "length": matrix,
+            }
+        )
+
+
+def test_connectome_bundle_rejects_nonnumeric_matrix_values() -> None:
+    matrix = np.zeros((2, 2))
+
+    with pytest.raises(SchemaError, match="count matrix"):
+        connectome_bundle_from_mapping(
+            {
+                "subject_id": "s1",
+                "roi_labels": ["a", "b"],
+                "count": [["bad", "bad"], ["bad", "bad"]],
+                "fa": matrix,
+                "length": matrix,
+            }
+        )
+
+
+def test_connectome_bundle_wraps_attribute_errors_from_matrix_conversion() -> None:
+    class BrokenArray:
+        def __array__(self, dtype: object = None, copy: object = None) -> np.ndarray:
+            raise AttributeError("broken external array")
+
+    matrix = np.zeros((2, 2))
+
+    with pytest.raises(SchemaError, match="count matrix"):
+        connectome_bundle_from_mapping(
+            {
+                "subject_id": "s1",
+                "roi_labels": ["a", "b"],
+                "count": BrokenArray(),
+                "fa": matrix,
+                "length": matrix,
+            }
+        )
+
+
+def test_connectome_bundle_rejects_nonfinite_matrix_values() -> None:
+    matrix = np.zeros((2, 2))
+    count = np.array([[0.0, np.nan], [1.0, 0.0]])
+
+    with pytest.raises(SchemaError, match="nonfinite"):
+        validate_connectome_bundle(
+            {
+                "subject_id": "s1",
+                "roi_labels": ["a", "b"],
+                "count": count,
+                "fa": matrix,
+                "length": matrix,
+            },
+            expected_n_rois=2,
+        )
+
+
+def test_connectome_bundle_copies_and_exposes_readonly_matrices() -> None:
+    count = np.array([[0.0, 2.0], [2.0, 0.0]])
+    fa = count * 0.3
+    length = count + np.eye(2)
+
+    bundle = ConnectomeBundle(
+        subject_id="s1",
+        roi_labels=("a", "b"),
+        count=count,
+        fa=fa,
+        length=length,
+    )
+
+    count[0, 1] = 99.0
+    fa[0, 1] = 99.0
+    length[0, 1] = 99.0
+
+    assert bundle.count[0, 1] == 2.0
+    assert bundle.fa[0, 1] == 0.6
+    assert bundle.length[0, 1] == 2.0
+    assert not np.shares_memory(bundle.count, count)
+    assert not np.shares_memory(bundle.fa, fa)
+    assert not np.shares_memory(bundle.length, length)
+
+    for matrix in (bundle.count, bundle.fa, bundle.length, bundle.matrix("count")):
+        with pytest.raises(ValueError, match="read-only"):
+            matrix[0, 0] = 1.0
 
 
 def test_connectome_bundle_rejects_shape_mismatch() -> None:
