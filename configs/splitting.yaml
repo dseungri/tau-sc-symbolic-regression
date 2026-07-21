@@ -1,7 +1,0 @@
-group_column: subject_id
-test_fraction: 0.2
-validation_strategy: grouped_kfold
-number_of_folds: 5
-random_seed: 20260721
-freeze_after_creation: true
-prohibit_subject_overlap: true
