@@ -21,17 +21,15 @@ Required columns:
 
 ### Connectome bundle
 
-Defined in `schemas.py`
-
-Each subject has a bundle containing
+Let `R = expected_n_rois`.
 
 ```python
 {
     "subject_id": str,
-    "roi_labels": list[str],
-    "count": np.ndarray,
-    "fa": np.ndarray,
-    "length": np.ndarray,
+    "roi_labels": tuple[str, ...],  # length: R
+    "count": np.ndarray,            # shape: (R, R)
+    "fa": np.ndarray,               # shape: (R, R)
+    "length": np.ndarray,           # shape: (R, R)
 }
 ```
 

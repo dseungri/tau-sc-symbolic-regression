@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tau-sc-symbolic-regression"
+version = "0.1.0"
+description = "Subject-specific structural connectome tau symbolic-regression infrastructure."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNSET" }
+authors = [
+  { name = "Daniel Chu" },
+  { name = "Jacob Lawson" },
+]
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "matplotlib",
+  "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "mypy",
+]
+imaging = [
+  "nibabel",
+  "pyarrow",
+]
+ml = [
+  "torch",
+  "torchdiffeq",
+]
+symbolic = [
+  "pysr",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
