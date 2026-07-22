@@ -35,7 +35,7 @@ Each subject has a bundle containing
 }
 ```
 
-#### Public Validation APIs
+### Public Validation APIs
 
 ```python
 validate_tau_table(table: pd.DataFrame, expected_n_rois: int = 148, require_complete_visits: bool = False) -> pd.DataFrame
