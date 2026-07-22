@@ -1,8 +1,8 @@
-# current interfaces 
+### Current interfaces
 
 Data interfaces used in project. New modules should keep formats
 
-## Tau Table
+### Tau table
 
 Defined in `schemas.py`
 
@@ -19,7 +19,7 @@ Required columns:
 | `roi_name` | Region label |
 | `tau_value` | Regional tau state |
 
-## Connectome Bundle
+### Connectome bundle
 
 Defined in `schemas.py`
 
