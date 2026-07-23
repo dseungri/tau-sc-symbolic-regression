@@ -142,3 +142,60 @@ Alignment rule:
 ```python
 baseline_tau[i] <-> roi_labels[i] <-> row/column i of adjacency and Laplacian matrices
 ```
+
+### Generic NumPy RK4 integration
+
+Defined in `ode.py`
+
+```python
+rk4_step(
+    rhs,
+    t: float,
+    y: np.ndarray,
+    step_size: float,
+) -> np.ndarray
+
+integrate_rk4(
+    rhs,
+    y0: np.ndarray,
+    times: np.ndarray,
+    *,
+    max_step=0.05,
+) -> np.ndarray
+```
+
+The right-hand side contract is:
+
+```python
+rhs(t: float, y: np.ndarray) -> np.ndarray
+```
+
+State and derivative arrays must be one-dimensional real numeric NumPy arrays with
+matching shape `(R,)`, nonempty and finite. `rk4_step` returns one newly allocated
+floating state vector with shape `(R,)`.
+
+`integrate_rk4` requires `times` to be a one-dimensional, finite, strictly increasing
+NumPy array. It returns a newly allocated floating trajectory with shape
+`(len(times), R)`, where the first row is a copy of `y0`. Forward integration only is
+supported. `max_step` is the maximum RK4 substep size, not a step count, and defaults
+to `0.05`.
+
+For each requested interval, the solver uses:
+
+```python
+n_steps = ceil((times[i + 1] - times[i]) / max_step)
+h = (times[i + 1] - times[i]) / n_steps
+```
+
+Each requested interval is subdivided into equal substeps. The returned trajectory
+contains only the requested observation times, not internal substep times.
+
+Invalid public inputs and invalid RHS return values raise `SchemaError`. Caller-owned
+arrays are not mutated, and every RHS call receives a fresh copy of the current RK4
+stage state so a mutating RHS cannot corrupt solver state or previously recorded
+trajectory rows. Integer states are integrated in floating point.
+
+This module is a generic NumPy ODE utility. It contains no tau-specific equation, uses
+no connectome or graph Laplacian, applies no clipping or nonnegativity constraint,
+adds no observation noise, performs no symbolic regression, and does not use adaptive
+time stepping.
