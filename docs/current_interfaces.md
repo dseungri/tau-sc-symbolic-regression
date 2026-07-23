@@ -54,7 +54,7 @@ build_connectome_representations(
 ```
 
 Let `R = expected_n_rois`. Each input and output matrix uses identical ROI ordering and
-shape `(R, R)`.
+shape `(R, R)`
 
 Return keys, in order:
 
@@ -75,6 +75,42 @@ scaled_length = length / subject_median_positive_length
 W_length = count / (scaled_length + length_epsilon)
 ```
 
-`scaled_length` and `W_length` are calculated on count support only. All representations
-preserve count support, are symmetric, and have zero diagonals. Length normalization is
-performed separately within each subject. This interface does not create Laplacians.
+`scaled_length` and `W_length` are calculated on count support only All representations
+preserve count support, are symmetric, and have zero diagonals, and length normalization is
+performed separately in each subject
+
+### Graph Laplacians
+
+```python
+build_graph_laplacian(
+    adjacency,
+    kind="unnormalized",
+) -> np.ndarray
+```
+
+Accepted `kind` values:
+
+```python
+[
+    "unnormalized",
+    "symmetric_normalized",
+]
+```
+
+Let `R = expected_n_rois`. The weighted adjacency `W` has shape `(R, R)`, and the
+returned Laplacian `L` has shape `(R, R)`. `W` must be finite, nonnegative,
+symmetric, zero-diagonal, and every node must currently have finite, positive
+weighted degree. ROI ordering is unchanged.
+
+Formulas:
+
+```python
+D[i, i] = sum_j W[i, j]
+L = D - W
+L_sym = I - D^(-1/2) W D^(-1/2)
+```
+
+A separate Laplacian is constructed for each subject and network representation.
+The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`.
+This function returns NumPy arrays and does not
+convert them to PyTorch tensors.
