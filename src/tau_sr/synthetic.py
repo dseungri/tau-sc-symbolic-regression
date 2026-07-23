@@ -71,7 +71,7 @@ def generate_baseline_tau(
     tau_min: float = 0.05,
     tau_max: float = 0.40,
 ) -> np.ndarray:
-    """Generate a synthetic normalized baseline tau-state vector"""
+    """Generate a synthetic baseline tau-state vector."""
 
     _require_int(n_regions, "n_regions", minimum=2)
     if not isinstance(rng, np.random.Generator):
