@@ -48,6 +48,7 @@ build_connectome_representations(
     count_matrix,
     fa_matrix,
     length_matrix,
+    *,
     length_epsilon=1e-8,
 ) -> dict[str, np.ndarray]
 ```
