@@ -69,7 +69,8 @@ def _validate_adjacency(adjacency: np.ndarray) -> np.ndarray:
     if not (adjacency > 0.0).any():
         raise SchemaError("adjacency must contain at least one positive edge.")
 
-    degree = adjacency.astype(float, copy=False).sum(axis=1)
-    if not np.all(degree > 0.0):
-        raise SchemaError("adjacency must have positive weighted degree at every node.")
+    with np.errstate(over="ignore", invalid="ignore"):
+        degree = adjacency.astype(float, copy=False).sum(axis=1)
+    if not (np.isfinite(degree).all() and np.all(degree > 0.0)):
+        raise SchemaError("adjacency must have finite, positive weighted degree at every node.")
     return degree

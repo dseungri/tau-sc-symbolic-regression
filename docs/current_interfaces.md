@@ -99,8 +99,8 @@ Accepted `kind` values:
 
 Let `R = expected_n_rois`. The weighted adjacency `W` has shape `(R, R)`, and the
 returned Laplacian `L` has shape `(R, R)`. `W` must be finite, nonnegative,
-symmetric, zero-diagonal, and every node must currently have positive weighted
-degree. ROI ordering is unchanged.
+symmetric, zero-diagonal, and every node must currently have finite, positive
+weighted degree. ROI ordering is unchanged.
 
 Formulas:
 

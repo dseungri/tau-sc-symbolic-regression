@@ -194,8 +194,19 @@ def test_build_graph_laplacian_accepts_integer_input() -> None:
         (lambda: np.array([[0.0, -np.inf], [-np.inf, 0.0]]), "finite"),
         (lambda: np.array([[0.0, -1.0], [-1.0, 0.0]]), "nonnegative"),
         (lambda: np.array([[0.0, 1.0], [2.0, 0.0]]), "symmetric"),
+        (lambda: np.array([[0.0, 1.0], [1.000001, 0.0]]), "symmetric"),
         (lambda: np.array([[1.0, 2.0], [2.0, 0.0]]), "diagonal"),
         (lambda: np.zeros((2, 2)), "positive edge"),
+        (
+            lambda: np.array(
+                [
+                    [0.0, np.finfo(float).max, np.finfo(float).max],
+                    [np.finfo(float).max, 0.0, np.finfo(float).max],
+                    [np.finfo(float).max, np.finfo(float).max, 0.0],
+                ]
+            ),
+            "finite, positive weighted degree",
+        ),
         (
             lambda: np.array(
                 [
