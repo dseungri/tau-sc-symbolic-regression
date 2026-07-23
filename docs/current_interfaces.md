@@ -33,7 +33,7 @@ Let `R = expected_n_rois`.
 }
 ```
 
-### Public Validation APIs
+### Public validation APIs
 
 ```python
 validate_tau_table(table: pd.DataFrame, expected_n_rois: int = 148, require_complete_visits: bool = False) -> pd.DataFrame
@@ -41,7 +41,7 @@ validate_tau_table(table: pd.DataFrame, expected_n_rois: int = 148, require_comp
 validate_connectome_bundle(bundle: ConnectomeBundle | Mapping, expected_n_rois: int = 148) -> ConnectomeBundle
 ```
 
-### Synthetic Connectome Representations
+### Synthetic connectome representations
 
 ```python
 build_connectome_representations(
@@ -79,7 +79,7 @@ W_length = count / (scaled_length + length_epsilon)
 preserve count support, are symmetric, and have zero diagonals, and length normalization is
 performed separately in each subject
 
-### Graph Laplacians
+### Graph laplacians
 
 ```python
 build_graph_laplacian(
@@ -114,3 +114,31 @@ A separate Laplacian is constructed for each subject and network representation.
 The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`.
 This function returns NumPy arrays and does not
 convert them to PyTorch tensors.
+
+### Synthetic baseline tau
+
+```python
+generate_baseline_tau(
+    n_regions,
+    rng,
+    *,
+    tau_min=0.05,
+    tau_max=0.40,
+) -> np.ndarray
+```
+
+Let `R = n_regions`. The output is a newly allocated one-dimensional floating NumPy
+array with shape `(R,)`. Each value is sampled independently from the half-open
+interval `[tau_min, tau_max)` using the caller-supplied `np.random.Generator`.
+Independent generators initialized with the same seed reproduce the same output, and
+calls with the same generator advance that generator normally.
+
+Validation requires `n_regions >= 2`, `rng` to be a NumPy generator, and finite
+non-Boolean numeric bounds satisfying `0 <= tau_min < tau_max`. Invalid inputs raise
+`SchemaError` before random values are consumed.
+
+Alignment rule:
+
+```python
+baseline_tau[i] <-> roi_labels[i] <-> row/column i of adjacency and Laplacian matrices
+```
