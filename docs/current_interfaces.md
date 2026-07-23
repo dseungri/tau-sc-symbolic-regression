@@ -19,6 +19,33 @@ Required columns:
 | `roi_name` | Region label |
 | `tau_value` | Regional tau state |
 
+### Synthetic Baseline Tau
+
+```python
+generate_baseline_tau(
+    n_regions,
+    rng,
+    *,
+    tau_min=0.05,
+    tau_max=0.40,
+) -> np.ndarray
+```
+
+Let `R = expected_n_rois`. The output is a baseline tau vector with shape `(R,)`,
+with one synthetic normalized baseline tau state value per ROI. Values are sampled
+independently and uniformly within the configured half-open interval
+`[tau_min, tau_max)`. The supplied NumPy generator controls reproducibility.
+
+Alignment rule:
+
+```python
+baseline_tau[i] <-> roi_labels[i] <-> row/column i of adjacency and Laplacian matrices
+```
+
+This function generates one subject only. It does not generate visits, follow-up tau,
+integrate an ODE, or use a connectome or Laplacian. These artificial software-test
+values must not be interpreted as raw SUVR measurements.
+
 ### Connectome bundle
 
 Let `R = expected_n_rois`.
