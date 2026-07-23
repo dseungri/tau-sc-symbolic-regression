@@ -11,7 +11,7 @@ from pysr import PySRRegressor
 # load variables as torch.tensor, also need to input train_test_split on variables later
 
 W = torch.tensor('N/A')     # define W as a pytorch tensor from loaded data
-D = torch.diag(W)
+D = torch.diag(W.sum(dim=1))
 
 L = D-W
 
@@ -40,7 +40,11 @@ class ReactionDiffusion(nn.Module):
         # y = [subjects, regions] = inital tau SUVR
             
         transport = -self.roe * torch.matmul(y, self.L.T) # transport term in ODE
-        reaction = self.reaction_eq(y.unsqueeze(-1).squeeze(-1)) # add initial tau SUVR to reaction
+        reaction = self.reaction_eq(
+            y.unsqueeze(-1)
+        ).squeeze(-1) 
+
+        # add initial tau SUVR to reaction
 
         return transport + reaction
         
@@ -67,7 +71,10 @@ def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
         optimizer.zero_grad()
 
         # forward prop
-        y_pred = model(y0, dt)
+        y_pred = model.forward_EulIntegration(
+            y0,
+            dt,
+        )
         loss = criterion(y_pred, y_target)
 
         loss.backward()
@@ -80,14 +87,20 @@ def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
 def sr(model):
 
     y_samples = torch.linspace(0, 5, 500).unsqueeze(-1)
-    model.eval
-    with torch.nograd():
-        r_pred = model.reaction_eq(y_samples).squeeze(-1).numpy()
+    model.eval()
+    with torch.no_grad():
+        r_pred = (
+            model.reaction_eq(y_samples)
+            .squeeze(-1)
+            .detach()
+            .cpu()
+            .numpy()
+        )
 
     sr_model = PySRRegressor(
         niterations=30,
-        binary_operators=["+", "*", "-", '/', "^"],
-        unary_operators=["sin", "cos", "exp", "log"],
+        binary_operators=["+", "*", "-"],
+        unary_operators=[],
         model_selection="best"
     )
 
