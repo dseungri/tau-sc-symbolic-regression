@@ -236,3 +236,56 @@ The factory stores an internal copy of the Laplacian
 transport/derivatives raise `SchemaError`
 
 This helper is compatible with `rk4_step` and `integrate_rk4`. 
+
+### Single-subject reaction-diffusion trajectory
+
+Defined in `simulation.py`
+
+```python
+simulate_reaction_diffusion_trajectory(
+    y0: np.ndarray,
+    times: np.ndarray,
+    laplacian: np.ndarray,
+    rho: float,
+    reaction_fn,
+    *,
+    max_step=0.05,
+) -> np.ndarray
+```
+
+One call simulates one subject with one Laplacian and one caller-supplied reaction
+law by composing `make_reaction_diffusion_rhs` and `integrate_rk4`
+
+For state vector `y` with shape `(R,)`, the integrated equation is:
+
+```python
+dy_dt = -rho * (laplacian @ y) + reaction_fn(y)
+```
+
+Inputs use:
+
+```python
+y0.shape == (R,)
+times.shape == (T,)
+laplacian.shape == (R, R)
+```
+
+The returned trajectory is a newly allocated floating NumPy array with shape
+`(T, R)`. Row `trajectory[0]` is a copy of `y0`, and rows are returned only for
+the exact requested observation times in `times`; internal RK4 substeps are not
+included. `times` may be irregularly spaced, may start from a nonzero or negative
+absolute time, and may contain a single valid time.
+
+`max_step` is forwarded unchanged to `integrate_rk4` as the maximum RK4 substep
+size. It is not a step count.
+
+ROI ordering is unchanged:
+
+```python
+trajectory[t_index, i] <-> y0[i] <-> roi_labels[i] <-> row/column i of laplacian
+```
+
+Validation is
+delegated to `make_reaction_diffusion_rhs` and `integrate_rk4`; invalid inputs,
+invalid reaction outputs, or nonfinite computed derivatives raise `SchemaError`.
+
