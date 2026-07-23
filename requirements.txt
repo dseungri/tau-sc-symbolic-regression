@@ -12,7 +12,7 @@ mypy
 
 # imaging/data IO
 nibabel
-pyarrow
+pyarrow>=14.0.2
 
 # Neural ODE modeling
 torch>=2.13.0

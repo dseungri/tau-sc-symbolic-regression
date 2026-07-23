@@ -1,31 +1,17 @@
 # import libraries
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-from pysr import PySRRegressor
-
-# define variables
-
-# load variables as torch.tensor, also need to input train_test_split on variables later
-
-W = torch.tensor('N/A')     # define W as a pytorch tensor from loaded data
-D = torch.diag(W.sum(dim=1))
-
-L = D-W
 
 # define reaction diffusion ODE using NN
 
 class ReactionDiffusion(nn.Module):
-    def __init__(self, L):
+    def __init__(self):
         super().__init__()
 
-        # input non-learnable parameter for the laplacian
-        self.register_buffer('L', L)
-
-        # set the learnable parameter roe for the tranport rate
-        self.roe = nn.Parameter(torch.tensor(0.1))
+        # set the unconstrained transport-rate parameter
+        self.raw_rho = nn.Parameter(torch.tensor(-2.0))
 
         # build MLP and layers using sequential NN
         self.reaction_eq = nn.Sequential(
@@ -36,10 +22,25 @@ class ReactionDiffusion(nn.Module):
             nn.Linear(16, 1)
         )
 
-    def forward(self, y):
+    def forward(self, y: torch.Tensor, laplacian: torch.Tensor) -> torch.Tensor:
         # y = [subjects, regions] = inital tau SUVR
-            
-        transport = -self.roe * torch.matmul(y, self.L.T) # transport term in ODE
+
+        if laplacian.ndim == 2:
+            transport = -self.rho * torch.matmul(
+                y,
+                laplacian.T,
+            )
+        elif laplacian.ndim == 3:
+            transport = -self.rho * torch.einsum(
+                "bij,bj->bi",
+                laplacian,
+                y,
+            )
+        else:
+            raise ValueError(
+                "laplacian must have shape [R, R] "
+                "or [B, R, R]."
+            )
         reaction = self.reaction_eq(
             y.unsqueeze(-1)
         ).squeeze(-1) 
@@ -47,32 +48,50 @@ class ReactionDiffusion(nn.Module):
         # add initial tau SUVR to reaction
 
         return transport + reaction
+
+    @property
+    def rho(self):
+        return F.softplus(self.raw_rho)
         
-    def forward_EulIntegration(self, y0, dt, steps=10):
+    def integrate_euler(self, y0, laplacian, dt, steps=10):
         # y0 = baseline tau
+        # laplacian = subject-specific graph laplacian
         # dt = time interval
         # steps = variable to improve integration accuracy
+
+        if (
+            isinstance(steps, bool)
+            or not isinstance(steps, int)
+            or steps < 1
+        ):
+            raise ValueError(
+                "steps must be a positive integer."
+            )
 
         h = dt/steps
         y = y0
 
         for _ in range(steps):
-            dydt = self.forward(y)
+            dydt = self.forward(
+                y,
+                laplacian,
+            )
             y = y+h*dydt
         return y # final predicted tau
         
-def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
+def train(model, y0, laplacian, dt, y_target, epochs=100, lr=1e-3):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
     # start nn training
-    for epoch in range(epochs):
+    for _epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
 
         # forward prop
-        y_pred = model.forward_EulIntegration(
+        y_pred = model.integrate_euler(
             y0,
+            laplacian,
             dt,
         )
         loss = criterion(y_pred, y_target)
@@ -85,8 +104,16 @@ def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
 # symbolic regression model
 
 def sr(model):
+    from pysr import PySRRegressor
 
-    y_samples = torch.linspace(0, 5, 500).unsqueeze(-1)
+    parameter = next(model.parameters())
+    y_samples = torch.linspace(
+        0,
+        5,
+        500,
+        device=parameter.device,
+        dtype=parameter.dtype,
+    ).unsqueeze(-1)
     model.eval()
     with torch.no_grad():
         r_pred = (
@@ -104,7 +131,8 @@ def sr(model):
         model_selection="best"
     )
 
-    sr_model.fit(y_samples.numpy(), r_pred)
+    sr_model.fit(y_samples.detach().cpu().numpy(), r_pred)
 
     print('Symbolic Regression Model for r_m(y):')
     print(sr_model)
+    return sr_model
