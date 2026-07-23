@@ -30,7 +30,7 @@ dev = [
 ]
 imaging = [
   "nibabel",
-  "pyarrow",
+  "pyarrow>=14.0.2",
 ]
 ml = [
   "torch",
