@@ -101,6 +101,39 @@ def test_rk4_step_uses_classical_stage_times_and_states() -> None:
     np.testing.assert_allclose(result, np.array([10.4, 20.8]))
 
 
+def test_rk4_step_uses_prior_stage_derivatives_for_stage_states() -> None:
+    calls: list[tuple[float, np.ndarray]] = []
+
+    def rhs(t: float, state: np.ndarray) -> np.ndarray:
+        calls.append((t, state.copy()))
+        return state.copy()
+
+    rk4_step(rhs, t=1.0, y=np.array([2.0]), step_size=0.2)
+
+    np.testing.assert_allclose([call[0] for call in calls], [1.0, 1.1, 1.1, 1.2])
+    expected_states = [
+        np.array([2.0]),
+        np.array([2.2]),
+        np.array([2.22]),
+        np.array([2.444]),
+    ]
+    for (_time, state), expected in zip(calls, expected_states, strict=True):
+        np.testing.assert_allclose(state, expected, atol=1e-14)
+
+
+def test_rk4_step_calls_rhs_exactly_four_times() -> None:
+    calls = 0
+
+    def rhs(_t: float, state: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.zeros_like(state)
+
+    rk4_step(rhs, 0.0, np.array([1.0, 2.0]), 0.1)
+
+    assert calls == 4
+
+
 def test_integrate_rk4_constant_derivative_irregular_and_negative_times() -> None:
     y0 = np.array([1.0, -2.0])
     derivative = np.array([2.0, -1.0])
@@ -134,6 +167,34 @@ def test_integrate_rk4_multidimensional_vector_ode() -> None:
     np.testing.assert_allclose(trajectory, expected, rtol=1e-9, atol=1e-11)
 
 
+def test_integrate_rk4_harmonic_oscillator_returns_near_initial_state() -> None:
+    def rhs(_t: float, state: np.ndarray) -> np.ndarray:
+        return np.array([state[1], -state[0]])
+
+    trajectory = integrate_rk4(
+        rhs,
+        np.array([1.0, 0.0]),
+        np.array([0.0, 2.0 * math.pi]),
+        max_step=0.01,
+    )
+
+    np.testing.assert_allclose(trajectory[-1], np.array([1.0, 0.0]), rtol=0.0, atol=1e-8)
+
+
+def test_integrate_rk4_error_decreases_at_fourth_order_rate() -> None:
+    times = np.array([0.0, 1.0])
+    y0 = np.array([1.0])
+
+    coarse = integrate_rk4(lambda _t, state: state.copy(), y0, times, max_step=0.25)
+    fine = integrate_rk4(lambda _t, state: state.copy(), y0, times, max_step=0.125)
+
+    coarse_error = abs(coarse[-1, 0] - math.e)
+    fine_error = abs(fine[-1, 0] - math.e)
+
+    assert fine_error < coarse_error
+    assert coarse_error / fine_error > 10.0
+
+
 def test_integrate_rk4_single_time_returns_initial_without_rhs_call() -> None:
     def rhs(_t: float, _y: np.ndarray) -> np.ndarray:
         raise AssertionError("rhs should not be called for a single requested time")
@@ -143,6 +204,19 @@ def test_integrate_rk4_single_time_returns_initial_without_rhs_call() -> None:
     trajectory = integrate_rk4(rhs, y0, np.array([2.5]))
 
     assert trajectory.shape == (1, 2)
+    np.testing.assert_array_equal(trajectory[0], y0)
+    assert not np.shares_memory(trajectory, y0)
+
+
+def test_integrate_rk4_initial_row_equals_but_does_not_alias_y0() -> None:
+    y0 = np.array([1.0, 2.0])
+
+    trajectory = integrate_rk4(
+        lambda _t, state: np.zeros_like(state),
+        y0,
+        np.array([0.0, 1.0]),
+    )
+
     np.testing.assert_array_equal(trajectory[0], y0)
     assert not np.shares_memory(trajectory, y0)
 
@@ -178,6 +252,77 @@ def test_integrate_rk4_subdivides_requested_intervals_equally(
     np.testing.assert_allclose(trajectory[:, 0], times)
 
 
+def test_integrate_rk4_uses_equal_rhs_stage_times_for_nondivisible_interval() -> None:
+    observed_stage_times: list[float] = []
+
+    def rhs(t: float, state: np.ndarray) -> np.ndarray:
+        observed_stage_times.append(t)
+        return np.zeros_like(state)
+
+    trajectory = integrate_rk4(
+        rhs,
+        np.array([1.0]),
+        np.array([0.0, 0.12]),
+        max_step=0.05,
+    )
+
+    expected_stage_times = [
+        0.00,
+        0.02,
+        0.02,
+        0.04,
+        0.04,
+        0.06,
+        0.06,
+        0.08,
+        0.08,
+        0.10,
+        0.10,
+        0.12,
+    ]
+    assert len(observed_stage_times) == 12
+    np.testing.assert_allclose(observed_stage_times, expected_stage_times, atol=1e-14)
+    assert trajectory.shape == (2, 1)
+
+
+@pytest.mark.parametrize(
+    ("interval_end", "max_step"),
+    [
+        (0.03, 0.05),
+        (0.05, 0.05),
+    ],
+)
+def test_integrate_rk4_short_or_equal_interval_uses_one_step(
+    interval_end: float,
+    max_step: float,
+) -> None:
+    calls = 0
+
+    def rhs(_t: float, state: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.zeros_like(state)
+
+    integrate_rk4(rhs, np.array([1.0]), np.array([0.0, interval_end]), max_step=max_step)
+
+    assert calls == 4
+
+
+def test_integrate_rk4_supports_nonzero_and_negative_initial_times() -> None:
+    times = np.array([-2.0, -1.5, 0.25])
+    y0 = np.array([4.0])
+
+    trajectory = integrate_rk4(
+        lambda _t, _state: np.array([2.0]),
+        y0,
+        times,
+        max_step=0.04,
+    )
+
+    expected = 4.0 + 2.0 * (times - times[0])
+    np.testing.assert_allclose(trajectory[:, 0], expected, atol=1e-12)
+
+
 def test_integrate_rk4_preserves_inputs_and_allocates_distinct_outputs() -> None:
     y0 = np.array([1.0, 2.0])
     times = np.array([0.0, 0.1])
@@ -195,7 +340,7 @@ def test_integrate_rk4_preserves_inputs_and_allocates_distinct_outputs() -> None
     assert not np.shares_memory(trajectory_a, y0)
 
 
-@pytest.mark.parametrize("bad_rhs", [None, 1, "rhs", np.array([1.0])])
+@pytest.mark.parametrize("bad_rhs", [None, 1, "rhs", object(), np.array([1.0])])
 def test_rk4_step_and_integrate_rk4_reject_invalid_rhs(bad_rhs: object) -> None:
     with pytest.raises(SchemaError, match="rhs"):
         rk4_step(bad_rhs, 0.0, np.array([1.0]), 0.1)  # type: ignore[arg-type]
@@ -206,7 +351,18 @@ def test_rk4_step_and_integrate_rk4_reject_invalid_rhs(bad_rhs: object) -> None:
 
 @pytest.mark.parametrize(
     "t",
-    [True, False, "0.0", 1.0 + 0.0j, np.array(0.0), np.nan, np.inf, -np.inf],
+    [
+        True,
+        False,
+        "0.0",
+        None,
+        1.0 + 0.0j,
+        1.0 + 2.0j,
+        np.array(0.0),
+        np.nan,
+        np.inf,
+        -np.inf,
+    ],
 )
 def test_rk4_step_rejects_invalid_t_values(t: object) -> None:
     with pytest.raises(SchemaError, match="t"):
@@ -215,7 +371,7 @@ def test_rk4_step_rejects_invalid_t_values(t: object) -> None:
 
 @pytest.mark.parametrize(
     "step_size",
-    [0.0, -0.1, True, False, "0.1", np.nan, np.inf, -np.inf],
+    [0.0, -0.1, True, False, "0.1", None, 1.0 + 2.0j, np.nan, np.inf, -np.inf],
 )
 def test_rk4_step_rejects_invalid_step_sizes(step_size: object) -> None:
     with pytest.raises(SchemaError, match="step_size"):
@@ -240,6 +396,7 @@ def test_rk4_step_rejects_invalid_step_sizes(step_size: object) -> None:
         lambda: np.array([1.0 + 0.0j, 2.0 + 0.0j]),
         lambda: np.array([1.0, np.nan]),
         lambda: np.array([1.0, np.inf]),
+        lambda: np.array([1.0, -np.inf]),
     ],
 )
 def test_rk4_step_rejects_invalid_state_arrays(state_factory: Callable[[], object]) -> None:
@@ -260,6 +417,7 @@ def test_rk4_step_rejects_invalid_state_arrays(state_factory: Callable[[], objec
         lambda: np.array([1.0 + 0.0j, 2.0 + 0.0j]),
         lambda: np.array([1.0, np.nan]),
         lambda: np.array([1.0, np.inf]),
+        lambda: np.array([1.0, -np.inf]),
     ],
 )
 def test_integrate_rk4_rejects_invalid_initial_states(
@@ -282,6 +440,7 @@ def test_integrate_rk4_rejects_invalid_initial_states(
         lambda: np.array([0.0 + 0.0j, 0.1 + 0.0j]),
         lambda: np.array([0.0, np.nan]),
         lambda: np.array([0.0, np.inf]),
+        lambda: np.array([0.0, -np.inf]),
         lambda: np.array([0.0, 0.0]),
         lambda: np.array([0.1, 0.0]),
         lambda: np.array([0.0, 0.2, 0.1]),
@@ -292,7 +451,24 @@ def test_integrate_rk4_rejects_invalid_times(times_factory: Callable[[], object]
         integrate_rk4(_constant_rhs(np.ones(2)), np.array([1.0, 2.0]), times_factory())  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("max_step", [0.0, -0.1, True, False, "0.1", np.nan, np.inf, -np.inf])
+def test_integrate_rk4_invalid_top_level_input_does_not_call_rhs() -> None:
+    calls = 0
+
+    def rhs(_t: float, state: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.zeros_like(state)
+
+    with pytest.raises(SchemaError):
+        integrate_rk4(rhs, np.array([1.0]), np.array([0.0, 0.0]))
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "max_step",
+    [0.0, -0.1, True, False, "0.1", None, 1.0 + 2.0j, np.nan, np.inf, -np.inf],
+)
 def test_integrate_rk4_rejects_invalid_max_steps(max_step: object) -> None:
     with pytest.raises(SchemaError, match="max_step"):
         integrate_rk4(
@@ -317,6 +493,7 @@ def test_integrate_rk4_rejects_invalid_max_steps(max_step: object) -> None:
         lambda: np.array([1.0 + 0.0j, 2.0 + 0.0j]),
         lambda: np.array([1.0, np.nan]),
         lambda: np.array([1.0, np.inf]),
+        lambda: np.array([1.0, -np.inf]),
     ],
 )
 def test_rk4_step_rejects_invalid_rhs_outputs(
@@ -345,6 +522,17 @@ def test_rk4_step_validates_later_rhs_stages_independently() -> None:
     assert calls == 3
 
 
+def test_rk4_step_does_not_hide_rhs_exceptions() -> None:
+    class ExpectedFailure(RuntimeError):
+        pass
+
+    def rhs(_t: float, _state: np.ndarray) -> np.ndarray:
+        raise ExpectedFailure("deliberate RHS failure")
+
+    with pytest.raises(ExpectedFailure, match="deliberate RHS failure"):
+        rk4_step(rhs, 0.0, np.array([1.0]), 0.1)
+
+
 def test_rk4_step_rejects_nonfinite_intermediate_states() -> None:
     def rhs(_t: float, _y: np.ndarray) -> np.ndarray:
         return np.array([np.finfo(float).max])
@@ -368,6 +556,21 @@ def test_rk4_step_rhs_mutation_cannot_mutate_input_or_internal_state() -> None:
     np.testing.assert_array_equal(y, y_before)
     np.testing.assert_allclose(result, y_before + 0.2)
     assert all(not np.shares_memory(stage_state, y) for stage_state in stage_arguments)
+
+
+def test_rk4_step_each_rhs_stage_receives_independent_state_array() -> None:
+    received_states: list[np.ndarray] = []
+    y = np.array([1.0, 2.0])
+
+    def rhs(_t: float, state: np.ndarray) -> np.ndarray:
+        received_states.append(state)
+        return np.zeros_like(state)
+
+    rk4_step(rhs, 0.0, y, 0.1)
+
+    assert len(received_states) == 4
+    assert len({id(state) for state in received_states}) == 4
+    assert all(not np.shares_memory(state, y) for state in received_states)
 
 
 def test_integrate_rk4_rhs_mutation_cannot_mutate_inputs_or_trajectory_rows() -> None:
