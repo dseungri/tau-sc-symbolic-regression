@@ -100,7 +100,7 @@ Accepted `kind` values:
 Let `R = expected_n_rois`. The weighted adjacency `W` has shape `(R, R)`, and the
 returned Laplacian `L` has shape `(R, R)`. `W` must be finite, nonnegative,
 symmetric, zero-diagonal, and every node must currently have finite, positive
-weighted degree. ROI ordering is unchanged.
+weighted degree. ROI ordering is unchanged
 
 Formulas:
 
@@ -110,10 +110,10 @@ L = D - W
 L_sym = I - D^(-1/2) W D^(-1/2)
 ```
 
-A separate Laplacian is constructed for each subject and network representation.
-The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`.
+A separate Laplacian is constructed for each subject and network representation
+The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`
 This function returns NumPy arrays and does not
-convert them to PyTorch tensors.
+convert them to PyTorch tensors
 
 ### Synthetic baseline tau
 
@@ -129,13 +129,13 @@ generate_baseline_tau(
 
 Let `R = n_regions`. The output is a newly allocated one-dimensional floating NumPy
 array with shape `(R,)`. Each value is sampled independently from the half-open
-interval `[tau_min, tau_max)` using the caller-supplied `np.random.Generator`.
+interval `[tau_min, tau_max)` using the caller-supplied `np.random.Generator`
 Independent generators initialized with the same seed reproduce the same output, and
-calls with the same generator advance that generator normally.
+calls with the same generator advance that generator normally
 
 Validation requires `n_regions >= 2`, `rng` to be a NumPy generator, and finite
 non-Boolean numeric bounds satisfying `0 <= tau_min < tau_max`. Invalid inputs raise
-`SchemaError` before random values are consumed.
+`SchemaError` before random values are consumed
 
 Alignment rule:
 
@@ -172,13 +172,13 @@ rhs(t: float, y: np.ndarray) -> np.ndarray
 
 State and derivative arrays must be one-dimensional real numeric NumPy arrays with
 matching shape `(R,)`, nonempty and finite. `rk4_step` returns one newly allocated
-floating state vector with shape `(R,)`.
+floating state vector with shape `(R,)`
 
 `integrate_rk4` requires `times` to be a one-dimensional, finite, strictly increasing
 NumPy array. It returns a newly allocated floating trajectory with shape
 `(len(times), R)`, where the first row is a copy of `y0`. Forward integration only is
 supported. `max_step` is the maximum RK4 substep size, not a step count, and defaults
-to `0.05`.
+to `0.05`
 
 For each requested interval, the solver uses:
 
@@ -187,15 +187,52 @@ n_steps = ceil((times[i + 1] - times[i]) / max_step)
 h = (times[i + 1] - times[i]) / n_steps
 ```
 
-Each requested interval is subdivided into equal substeps. The returned trajectory
-contains only the requested observation times, not internal substep times.
 
-Invalid public inputs and invalid RHS return values raise `SchemaError`. Caller-owned
-arrays are not mutated, and every RHS call receives a fresh copy of the current RK4
-stage state so a mutating RHS cannot corrupt solver state or previously recorded
-trajectory rows. Integer states are integrated in floating point.
 
-This module is a generic NumPy ODE utility. It contains no tau-specific equation, uses
-no connectome or graph Laplacian, applies no clipping or nonnegativity constraint,
-adds no observation noise, performs no symbolic regression, and does not use adaptive
-time stepping.
+### NumPy Reaction-Diffusion RHS
+
+Defined in `dynamics.py`
+
+```python
+make_reaction_diffusion_rhs(
+    laplacian: np.ndarray,
+    rho: float,
+    reaction_fn,
+) -> Callable[[float, np.ndarray], np.ndarray]
+```
+
+The returned callable has the RK4-compatible signature:
+
+```python
+rhs(t: float, y: np.ndarray) -> np.ndarray
+```
+
+For one subject and one connectome representation, it computes:
+
+```python
+transport = -rho * (laplacian @ y)
+reaction = reaction_fn(y)
+dy_dt = transport + reaction
+```
+
+`laplacian` must be a finite, real numeric, square NumPy array with shape `(R, R)`
+`rho` must be finite, non-Boolean, and nonnegative `reaction_fn` must be callable
+and return a finite, real numeric NumPy vector with shape `(R,)` when passed a state
+vector with shape `(R,)`
+
+Dynamic states `y` must be finite, real numeric, one-dimensional NumPy arrays with
+shape `(R,)`. The output is a newly allocated floating NumPy array with shape `(R,)`
+The equation is autonomous, so `t` is validated for RK4 compatibility but is not used
+in the calculation
+
+The Laplacian and state must use the same ROI order:
+
+```python
+y[i] <-> roi_labels[i] <-> row/column i of laplacian
+```
+
+The factory stores an internal copy of the Laplacian
+ The returned RHS passes a fresh copy of `y` to `reaction_fn`. Invalid factory inputs/invalid dynamic inputs/invalid reaction outputs/nonfinite computed
+transport/derivatives raise `SchemaError`
+
+This helper is compatible with `rk4_step` and `integrate_rk4`. 
