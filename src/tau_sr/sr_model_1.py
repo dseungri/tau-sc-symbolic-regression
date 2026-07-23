@@ -90,13 +90,13 @@ def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
 def sr(model):
     from pysr import PySRRegressor
 
-    parameter = next(model.parameters())
+    reaction_parameter = next(model.reaction_eq.parameters())
     y_samples = torch.linspace(
         0,
         5,
         500,
-        device=parameter.device,
-        dtype=parameter.dtype,
+        device=reaction_parameter.device,
+        dtype=reaction_parameter.dtype,
     ).unsqueeze(-1)
     model.eval()
     with torch.no_grad():
