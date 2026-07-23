@@ -64,6 +64,26 @@ def generate_synthetic_roi_labels(
     return tuple(f"syn_roi_{index + 1:03d}" for index in range(checked.n_regions))
 
 
+def generate_baseline_tau(
+    n_regions: int,
+    rng: np.random.Generator,
+    *,
+    tau_min: float = 0.05,
+    tau_max: float = 0.40,
+) -> np.ndarray:
+    """Generate a synthetic baseline tau-state vector."""
+
+    _require_int(n_regions, "n_regions", minimum=2)
+    if not isinstance(rng, np.random.Generator):
+        raise SchemaError("rng must be a numpy.random.Generator.")
+    _require_float(tau_min, "tau_min", minimum=0.0)
+    _require_float(tau_max, "tau_max", minimum=0.0)
+    if tau_max <= tau_min:
+        raise SchemaError("tau_max must be greater than tau_min.")
+
+    return rng.uniform(tau_min, tau_max, size=n_regions)
+
+
 def generate_count_connectome(
     n_regions: int,
     rng: np.random.Generator,

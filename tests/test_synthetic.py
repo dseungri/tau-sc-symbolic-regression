@@ -9,6 +9,7 @@ from tau_sr.schemas import SchemaError
 from tau_sr.synthetic import (
     SyntheticCohortConfig,
     build_connectome_representations,
+    generate_baseline_tau,
     generate_count_connectome,
     generate_edge_attributes,
     generate_synthetic_roi_labels,
@@ -130,6 +131,168 @@ def test_generate_synthetic_roi_labels_uses_region_count_only() -> None:
 
     assert labels_a == labels_b
     assert labels_a[-1] == "syn_roi_003"
+
+
+def test_generate_baseline_tau_standard_case() -> None:
+    baseline = generate_baseline_tau(148, np.random.default_rng(42))
+
+    assert isinstance(baseline, np.ndarray)
+    assert baseline.shape == (148,)
+    assert len(baseline) == 148
+    assert np.issubdtype(baseline.dtype, np.floating)
+    assert np.isfinite(baseline).all()
+    assert np.all(baseline >= 0.05)
+    assert np.all(baseline < 0.40)
+
+
+def test_generate_baseline_tau_matches_config_defaults() -> None:
+    config = SyntheticCohortConfig()
+
+    baseline = generate_baseline_tau(
+        config.n_regions,
+        np.random.default_rng(config.seed),
+        tau_min=config.baseline_tau_min,
+        tau_max=config.baseline_tau_max,
+    )
+
+    assert baseline.shape == (config.n_regions,)
+    assert np.all(baseline >= config.baseline_tau_min)
+    assert np.all(baseline < config.baseline_tau_max)
+
+
+def test_generate_baseline_tau_is_reproducible_for_same_seed() -> None:
+    baseline_a = generate_baseline_tau(148, np.random.default_rng(42))
+    baseline_b = generate_baseline_tau(148, np.random.default_rng(42))
+
+    np.testing.assert_array_equal(baseline_a, baseline_b)
+
+
+def test_generate_baseline_tau_differs_for_different_seeds() -> None:
+    baseline_a = generate_baseline_tau(148, np.random.default_rng(42))
+    baseline_b = generate_baseline_tau(148, np.random.default_rng(43))
+
+    assert not np.array_equal(baseline_a, baseline_b)
+
+
+def test_generate_baseline_tau_advances_supplied_rng_state() -> None:
+    rng = np.random.default_rng(42)
+
+    first = generate_baseline_tau(10, rng)
+    second = generate_baseline_tau(10, rng)
+
+    replay_rng = np.random.default_rng(42)
+    replay_first = generate_baseline_tau(10, replay_rng)
+    replay_second = generate_baseline_tau(10, replay_rng)
+
+    assert not np.array_equal(first, second)
+    np.testing.assert_array_equal(first, replay_first)
+    np.testing.assert_array_equal(second, replay_second)
+
+
+@pytest.mark.parametrize(
+    ("tau_min", "tau_max"),
+    [
+        (0.12, 0.18),
+        (1.2, 2.4),
+        (0.0, 0.5),
+    ],
+)
+def test_generate_baseline_tau_respects_custom_bounds(
+    tau_min: float,
+    tau_max: float,
+) -> None:
+    baseline = generate_baseline_tau(
+        12,
+        np.random.default_rng(42),
+        tau_min=tau_min,
+        tau_max=tau_max,
+    )
+
+    assert np.all(baseline >= tau_min)
+    assert np.all(baseline < tau_max)
+
+
+def test_generate_baseline_tau_accepts_two_regions() -> None:
+    baseline = generate_baseline_tau(2, np.random.default_rng(42))
+
+    assert baseline.shape == (2,)
+    assert np.issubdtype(baseline.dtype, np.floating)
+    assert np.all(baseline >= 0.05)
+    assert np.all(baseline < 0.40)
+
+
+@pytest.mark.parametrize("n_regions", [0, 1, -1, True, False, 3.5, "148", None])
+def test_generate_baseline_tau_rejects_invalid_region_counts(n_regions: object) -> None:
+    with pytest.raises(SchemaError, match="n_regions"):
+        generate_baseline_tau(n_regions, np.random.default_rng(42))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("rng", [42, None, "rng", np.random.RandomState(42)])
+def test_generate_baseline_tau_rejects_invalid_rng(rng: object) -> None:
+    with pytest.raises(SchemaError, match="rng"):
+        generate_baseline_tau(12, rng)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"tau_min": -0.1}, "tau_min"),
+        ({"tau_min": np.nan}, "tau_min"),
+        ({"tau_min": np.inf}, "tau_min"),
+        ({"tau_min": -np.inf}, "tau_min"),
+        ({"tau_min": True}, "tau_min"),
+        ({"tau_min": "0.05"}, "tau_min"),
+        ({"tau_min": None}, "tau_min"),
+        ({"tau_max": np.nan}, "tau_max"),
+        ({"tau_max": np.inf}, "tau_max"),
+        ({"tau_max": -np.inf}, "tau_max"),
+        ({"tau_max": False}, "tau_max"),
+        ({"tau_max": "0.40"}, "tau_max"),
+        ({"tau_max": None}, "tau_max"),
+        ({"tau_min": 0.2, "tau_max": 0.2}, "tau_max"),
+        ({"tau_min": 0.4, "tau_max": 0.2}, "tau_max"),
+    ],
+)
+def test_generate_baseline_tau_rejects_invalid_bounds(
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(SchemaError, match=message):
+        generate_baseline_tau(
+            12,
+            np.random.default_rng(42),
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+
+def test_generate_baseline_tau_outputs_independent_arrays() -> None:
+    baseline_a = generate_baseline_tau(12, np.random.default_rng(42))
+    baseline_b = generate_baseline_tau(12, np.random.default_rng(42))
+
+    np.testing.assert_array_equal(baseline_a, baseline_b)
+    assert baseline_a is not baseline_b
+    assert not np.shares_memory(baseline_a, baseline_b)
+
+
+def test_generate_baseline_tau_does_not_mutate_global_numpy_rng_state() -> None:
+    np.random.seed(12345)
+    expected = np.random.random(5)
+
+    np.random.seed(12345)
+    generate_baseline_tau(10, np.random.default_rng(42))
+    observed = np.random.random(5)
+
+    np.testing.assert_array_equal(observed, expected)
+
+
+def test_generate_baseline_tau_invalid_calls_do_not_advance_rng_state() -> None:
+    rng = np.random.default_rng(42)
+    expected_rng = np.random.default_rng(42)
+
+    with pytest.raises(SchemaError, match="tau_max"):
+        generate_baseline_tau(12, rng, tau_min=0.4, tau_max=0.2)
+
+    np.testing.assert_array_equal(rng.random(5), expected_rng.random(5))
 
 
 def test_generate_count_connectome_has_expected_adjacency_structure() -> None:
