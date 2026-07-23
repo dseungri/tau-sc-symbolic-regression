@@ -110,6 +110,7 @@ L = D - W
 L_sym = I - D^(-1/2) W D^(-1/2)
 ```
 
-Separate Laplacian is constructed for each subject and each network representation
-Transport term uses `-rho * L * y`. This function returns NumPy arrays and does not
+A separate Laplacian is constructed for each subject and network representation.
+The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`.
+This function returns NumPy arrays and does not
 convert them to PyTorch tensors.
