@@ -62,7 +62,7 @@ def _validate_adjacency(adjacency: np.ndarray) -> np.ndarray:
         raise SchemaError("adjacency must contain only finite values.")
     if (adjacency < 0.0).any():
         raise SchemaError("adjacency must be nonnegative.")
-    if not np.allclose(adjacency, adjacency.T, rtol=1e-7, atol=1e-12):
+    if not np.array_equal(adjacency, adjacency.T):
         raise SchemaError("adjacency must be symmetric.")
     if not np.array_equal(np.diag(adjacency), np.zeros(adjacency.shape[0])):
         raise SchemaError("adjacency diagonal must be exactly zero.")
