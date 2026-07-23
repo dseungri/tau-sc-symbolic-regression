@@ -8,11 +8,59 @@ import pytest
 from tau_sr.schemas import SchemaError
 from tau_sr.synthetic import (
     SyntheticCohortConfig,
+    build_connectome_representations,
     generate_count_connectome,
     generate_edge_attributes,
     generate_synthetic_roi_labels,
     validate_synthetic_config,
 )
+
+
+def _valid_representation_inputs() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    count = generate_count_connectome(148, np.random.default_rng(42))
+    fa, length = generate_edge_attributes(count, np.random.default_rng(123))
+    return count, fa, length
+
+
+def _small_valid_matrices() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    count = np.array(
+        [
+            [0.0, 2.0, 0.0],
+            [2.0, 0.0, 4.0],
+            [0.0, 4.0, 0.0],
+        ]
+    )
+    fa = np.array(
+        [
+            [0.0, 0.5, 0.0],
+            [0.5, 0.0, 0.25],
+            [0.0, 0.25, 0.0],
+        ]
+    )
+    length = np.array(
+        [
+            [0.0, 20.0, 0.0],
+            [20.0, 0.0, 40.0],
+            [0.0, 40.0, 0.0],
+        ]
+    )
+    return count, fa, length
+
+
+def _expected_length_adjusted(
+    count: np.ndarray,
+    length: np.ndarray,
+    *,
+    length_epsilon: float = 1e-8,
+) -> np.ndarray:
+    support = count > 0.0
+    upper_support = np.triu(support, k=1)
+    median_length = np.median(length[upper_support])
+    scaled_length = np.zeros_like(length, dtype=float)
+    scaled_length[support] = length[support] / median_length
+    expected = np.zeros_like(count, dtype=float)
+    expected[support] = count[support] / (scaled_length[support] + length_epsilon)
+    return expected
 
 
 def test_synthetic_config_defaults_are_valid() -> None:
@@ -349,3 +397,302 @@ def test_generate_edge_attributes_rejects_invalid_length_bounds(
 
     with pytest.raises(SchemaError, match=message):
         generate_edge_attributes(count, np.random.default_rng(123), **kwargs)  # type: ignore[arg-type]
+
+
+def test_build_connectome_representations_standard_case() -> None:
+    count, fa, length = _valid_representation_inputs()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    assert isinstance(representations, dict)
+    assert list(representations) == ["count", "fa_weighted", "length_adjusted"]
+    for network in representations.values():
+        assert network.shape == (148, 148)
+        assert np.issubdtype(network.dtype, np.floating)
+        assert np.isfinite(network).all()
+        assert np.all(network >= 0.0)
+        assert np.allclose(network, network.T)
+        np.testing.assert_array_equal(np.diag(network), np.zeros(148))
+        np.testing.assert_array_equal(network > 0.0, count > 0.0)
+
+
+def test_build_connectome_representations_exact_count_formula() -> None:
+    count, fa, length = _valid_representation_inputs()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    np.testing.assert_array_equal(representations["count"], count)
+    assert not np.shares_memory(representations["count"], count)
+
+
+def test_build_connectome_representations_exact_fa_formula() -> None:
+    count, fa, length = _valid_representation_inputs()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    np.testing.assert_allclose(representations["fa_weighted"], count * fa)
+
+
+def test_build_connectome_representations_exact_length_formula() -> None:
+    count, fa, length = _valid_representation_inputs()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    np.testing.assert_allclose(
+        representations["length_adjusted"],
+        _expected_length_adjusted(count, length),
+    )
+
+
+def test_build_connectome_representations_median_scaling_interpretation() -> None:
+    count = np.array(
+        [
+            [0.0, 6.0, 0.0, 0.0],
+            [6.0, 0.0, 6.0, 0.0],
+            [0.0, 6.0, 0.0, 6.0],
+            [0.0, 0.0, 6.0, 0.0],
+        ]
+    )
+    fa = (count > 0.0).astype(float) * 0.5
+    length = np.array(
+        [
+            [0.0, 10.0, 0.0, 0.0],
+            [10.0, 0.0, 20.0, 0.0],
+            [0.0, 20.0, 0.0, 30.0],
+            [0.0, 0.0, 30.0, 0.0],
+        ]
+    )
+    length_epsilon = 1e-4
+
+    representations = build_connectome_representations(
+        count,
+        fa,
+        length,
+        length_epsilon=length_epsilon,
+    )
+    adjusted = representations["length_adjusted"]
+
+    assert adjusted[0, 1] > adjusted[1, 2]
+    assert adjusted[2, 3] < adjusted[1, 2]
+    assert adjusted[1, 2] == pytest.approx(6.0 / (1.0 + length_epsilon))
+
+
+def test_build_connectome_representations_preserves_chain_only_support() -> None:
+    n_regions = 6
+    count = generate_count_connectome(
+        n_regions,
+        np.random.default_rng(42),
+        edge_probability=0.0,
+    )
+    fa, length = generate_edge_attributes(count, np.random.default_rng(123))
+
+    representations = build_connectome_representations(count, fa, length)
+
+    chain_support = count > 0.0
+    assert np.count_nonzero(np.triu(chain_support, k=1)) == n_regions - 1
+    for network in representations.values():
+        np.testing.assert_array_equal(network > 0.0, chain_support)
+        assert np.count_nonzero(np.triu(network > 0.0, k=1)) == n_regions - 1
+
+
+def test_build_connectome_representations_preserves_inputs() -> None:
+    count, fa, length = _valid_representation_inputs()
+    count_before = count.copy()
+    fa_before = fa.copy()
+    length_before = length.copy()
+
+    build_connectome_representations(count, fa, length)
+
+    np.testing.assert_array_equal(count, count_before)
+    np.testing.assert_array_equal(fa, fa_before)
+    np.testing.assert_array_equal(length, length_before)
+
+
+def test_build_connectome_representations_allocates_independent_outputs() -> None:
+    count, fa, length = _valid_representation_inputs()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    for network in representations.values():
+        assert not np.shares_memory(network, count)
+        assert not np.shares_memory(network, fa)
+        assert not np.shares_memory(network, length)
+    assert not np.shares_memory(representations["count"], representations["fa_weighted"])
+    assert not np.shares_memory(representations["count"], representations["length_adjusted"])
+    assert not np.shares_memory(
+        representations["fa_weighted"],
+        representations["length_adjusted"],
+    )
+
+
+def test_build_connectome_representations_small_graph() -> None:
+    count, fa, length = _small_valid_matrices()
+
+    representations = build_connectome_representations(count, fa, length)
+
+    assert representations["count"].shape == (3, 3)
+    np.testing.assert_array_equal(representations["count"], count)
+    np.testing.assert_allclose(representations["fa_weighted"], count * fa)
+    np.testing.assert_allclose(
+        representations["length_adjusted"],
+        _expected_length_adjusted(count, length),
+    )
+    for network in representations.values():
+        assert np.allclose(network, network.T)
+        np.testing.assert_array_equal(np.diag(network), np.zeros(3))
+        np.testing.assert_array_equal(network > 0.0, count > 0.0)
+
+
+def test_build_connectome_representations_respects_custom_epsilon() -> None:
+    count, fa, length = _small_valid_matrices()
+
+    small_epsilon_reps = build_connectome_representations(
+        count,
+        fa,
+        length,
+        length_epsilon=1e-8,
+    )
+    large_epsilon_reps = build_connectome_representations(
+        count,
+        fa,
+        length,
+        length_epsilon=0.5,
+    )
+
+    np.testing.assert_allclose(
+        large_epsilon_reps["length_adjusted"],
+        _expected_length_adjusted(count, length, length_epsilon=0.5),
+    )
+    support = count > 0.0
+    np.testing.assert_array_equal(
+        large_epsilon_reps["length_adjusted"] > 0.0,
+        support,
+    )
+    assert np.all(
+        large_epsilon_reps["length_adjusted"][support]
+        < small_epsilon_reps["length_adjusted"][support]
+    )
+
+
+@pytest.mark.parametrize(
+    ("matrix_name", "replacement"),
+    [
+        ("fa_matrix", np.zeros((4, 4))),
+        ("length_matrix", np.zeros((4, 4))),
+    ],
+)
+def test_build_connectome_representations_rejects_shape_mismatch(
+    matrix_name: str,
+    replacement: np.ndarray,
+) -> None:
+    count, fa, length = _small_valid_matrices()
+    matrices = {
+        "count_matrix": count,
+        "fa_matrix": fa,
+        "length_matrix": length,
+    }
+    matrices[matrix_name] = replacement
+
+    with pytest.raises(SchemaError, match=matrix_name):
+        build_connectome_representations(
+            matrices["count_matrix"],
+            matrices["fa_matrix"],
+            matrices["length_matrix"],
+        )
+
+
+@pytest.mark.parametrize(
+    ("matrix_name", "row", "col", "value"),
+    [
+        ("fa_matrix", 0, 1, 0.0),
+        ("length_matrix", 0, 1, 0.0),
+        ("fa_matrix", 0, 2, 0.5),
+        ("length_matrix", 0, 2, 10.0),
+    ],
+)
+def test_build_connectome_representations_rejects_support_mismatch(
+    matrix_name: str,
+    row: int,
+    col: int,
+    value: float,
+) -> None:
+    count, fa, length = _small_valid_matrices()
+    matrices = {
+        "count_matrix": count,
+        "fa_matrix": fa.copy(),
+        "length_matrix": length.copy(),
+    }
+    matrices[matrix_name][row, col] = value
+    matrices[matrix_name][col, row] = value
+
+    with pytest.raises(SchemaError, match=rf"{matrix_name} support"):
+        build_connectome_representations(
+            matrices["count_matrix"],
+            matrices["fa_matrix"],
+            matrices["length_matrix"],
+        )
+
+
+@pytest.mark.parametrize("matrix_name", ["count_matrix", "fa_matrix", "length_matrix"])
+@pytest.mark.parametrize(
+    ("matrix_factory", "message"),
+    [
+        (lambda: [[0.0, 1.0], [1.0, 0.0]], "NumPy"),
+        (lambda: np.array([0.0, 1.0]), "two-dimensional"),
+        (lambda: np.zeros((2, 3)), "square"),
+        (lambda: np.zeros((1, 1)), "at least 2"),
+        (lambda: np.array([[False, True], [True, False]]), "real numeric"),
+        (lambda: np.array([[0.0, 1.0], [1.0, 0.0]], dtype=object), "real numeric"),
+        (lambda: np.array([["0", "1"], ["1", "0"]]), "real numeric"),
+        (lambda: np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex), "real numeric"),
+        (lambda: np.array([[0.0, np.nan], [np.nan, 0.0]]), "finite"),
+        (lambda: np.array([[0.0, np.inf], [np.inf, 0.0]]), "finite"),
+        (lambda: np.array([[0.0, -1.0], [-1.0, 0.0]]), "nonnegative"),
+        (lambda: np.array([[0.0, 1.0], [2.0, 0.0]]), "symmetric"),
+        (lambda: np.array([[1.0, 2.0], [2.0, 0.0]]), "diagonal"),
+    ],
+)
+def test_build_connectome_representations_rejects_invalid_matrices(
+    matrix_name: str,
+    matrix_factory: object,
+    message: str,
+) -> None:
+    count, fa, length = _small_valid_matrices()
+    matrices = {
+        "count_matrix": count,
+        "fa_matrix": fa,
+        "length_matrix": length,
+    }
+    matrices[matrix_name] = matrix_factory()  # type: ignore[operator]
+
+    with pytest.raises(SchemaError, match=rf"{matrix_name}.*{message}"):
+        build_connectome_representations(
+            matrices["count_matrix"],  # type: ignore[arg-type]
+            matrices["fa_matrix"],  # type: ignore[arg-type]
+            matrices["length_matrix"],  # type: ignore[arg-type]
+        )
+
+
+def test_build_connectome_representations_rejects_count_without_positive_edge() -> None:
+    count, fa, length = _small_valid_matrices()
+    count = np.zeros_like(count)
+    fa = np.zeros_like(fa)
+    length = np.zeros_like(length)
+
+    with pytest.raises(SchemaError, match="positive edge"):
+        build_connectome_representations(count, fa, length)
+
+
+@pytest.mark.parametrize("length_epsilon", [0.0, -1.0, np.nan, np.inf, -np.inf, True, "0.1", None])
+def test_build_connectome_representations_rejects_invalid_epsilon(
+    length_epsilon: object,
+) -> None:
+    count, fa, length = _small_valid_matrices()
+
+    with pytest.raises(SchemaError, match="length_epsilon"):
+        build_connectome_representations(
+            count,
+            fa,
+            length,
+            length_epsilon=length_epsilon,  # type: ignore[arg-type]
+        )
