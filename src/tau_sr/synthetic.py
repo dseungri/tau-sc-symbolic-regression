@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from numbers import Real
 
 import numpy as np
@@ -48,7 +48,9 @@ def validate_synthetic_config(config: SyntheticCohortConfig) -> SyntheticCohortC
 
     _require_float(config.observation_noise_std, "observation_noise_std", minimum=0.0)
     if config.add_observation_noise and config.observation_noise_std == 0.0:
-        raise SchemaError("observation_noise_std must be positive when observation noise is enabled.")
+        raise SchemaError(
+            "observation_noise_std must be positive when observation noise is enabled."
+        )
 
     return config
 
@@ -132,6 +134,64 @@ def generate_edge_attributes(
     return fa_matrix, length_matrix
 
 
+def build_connectome_representations(
+    count_matrix: np.ndarray,
+    fa_matrix: np.ndarray,
+    length_matrix: np.ndarray,
+    *,
+    length_epsilon: float = 1e-8,
+) -> dict[str, np.ndarray]:
+    """Build count, FA-weighted, and length-adjusted networks."""
+
+    _validate_count_matrix(count_matrix)
+    _validate_matrix(fa_matrix, "fa_matrix")
+    _validate_matrix(length_matrix, "length_matrix")
+    _require_float(length_epsilon, "length_epsilon", minimum=0.0)
+    if length_epsilon <= 0.0:
+        raise SchemaError("length_epsilon must be greater than 0.")
+
+    if fa_matrix.shape != count_matrix.shape:
+        raise SchemaError(
+            f"fa_matrix has shape {fa_matrix.shape}; expected {count_matrix.shape}."
+        )
+    if length_matrix.shape != count_matrix.shape:
+        raise SchemaError(
+            f"length_matrix has shape {length_matrix.shape}; expected {count_matrix.shape}."
+        )
+
+    support = count_matrix > 0.0
+    if not np.array_equal(fa_matrix > 0.0, support):
+        raise SchemaError("fa_matrix support must match count_matrix support.")
+    if not np.array_equal(length_matrix > 0.0, support):
+        raise SchemaError("length_matrix support must match count_matrix support.")
+
+    upper_support = np.triu(support, k=1)
+    count_network = count_matrix.astype(float, copy=True)
+
+    fa_weighted_network = count_network * fa_matrix.astype(float, copy=False)
+    np.fill_diagonal(fa_weighted_network, 0.0)
+
+    positive_upper_lengths = length_matrix[upper_support]
+    median_positive_length = np.median(positive_upper_lengths)
+    if not math.isfinite(float(median_positive_length)) or median_positive_length <= 0.0:
+        raise SchemaError("median positive length must be finite and greater than 0.")
+
+    scaled_length = np.zeros(count_matrix.shape, dtype=float)
+    scaled_length[support] = length_matrix[support] / median_positive_length
+
+    length_adjusted_network = np.zeros(count_matrix.shape, dtype=float)
+    length_adjusted_network[support] = (
+        count_network[support] / (scaled_length[support] + length_epsilon)
+    )
+    np.fill_diagonal(length_adjusted_network, 0.0)
+
+    return {
+        "count": count_network,
+        "fa_weighted": fa_weighted_network,
+        "length_adjusted": length_adjusted_network,
+    }
+
+
 def _require_int(value: object, field_name: str, *, minimum: int) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise SchemaError(f"{field_name} must be an integer.")
@@ -155,29 +215,33 @@ def _require_probability(value: object, field_name: str) -> None:
 
 
 def _validate_count_matrix(count_matrix: np.ndarray) -> None:
-    if not isinstance(count_matrix, np.ndarray):
-        raise SchemaError("count_matrix must be a NumPy array.")
-    if count_matrix.ndim != 2:
-        raise SchemaError("count_matrix must be two-dimensional.")
-    if count_matrix.shape[0] != count_matrix.shape[1]:
-        raise SchemaError("count_matrix must be square.")
-    if count_matrix.shape[0] < 2:
-        raise SchemaError("count_matrix must have at least 2 rows.")
-    if (
-        count_matrix.dtype.kind in {"b", "O", "S", "U", "c"}
-        or not np.issubdtype(count_matrix.dtype, np.number)
-    ):
-        raise SchemaError("count_matrix must have a real numeric dtype.")
-    if not np.isfinite(count_matrix).all():
-        raise SchemaError("count_matrix must contain only finite values.")
-    if (count_matrix < 0.0).any():
-        raise SchemaError("count_matrix must be nonnegative.")
-    if not np.allclose(count_matrix, count_matrix.T, rtol=1e-7, atol=1e-12):
-        raise SchemaError("count_matrix must be symmetric.")
-    if not np.array_equal(np.diag(count_matrix), np.zeros(count_matrix.shape[0])):
-        raise SchemaError("count_matrix diagonal must be exactly zero.")
+    _validate_matrix(count_matrix, "count_matrix")
     if not (count_matrix > 0.0).any():
         raise SchemaError("count_matrix must contain at least one positive edge.")
+
+
+def _validate_matrix(matrix: np.ndarray, matrix_name: str) -> None:
+    if not isinstance(matrix, np.ndarray):
+        raise SchemaError(f"{matrix_name} must be a NumPy array.")
+    if matrix.ndim != 2:
+        raise SchemaError(f"{matrix_name} must be two-dimensional.")
+    if matrix.shape[0] != matrix.shape[1]:
+        raise SchemaError(f"{matrix_name} must be square.")
+    if matrix.shape[0] < 2:
+        raise SchemaError(f"{matrix_name} must have at least 2 rows.")
+    if (
+        matrix.dtype.kind in {"b", "O", "S", "U", "c"}
+        or not np.issubdtype(matrix.dtype, np.number)
+    ):
+        raise SchemaError(f"{matrix_name} must have a real numeric dtype.")
+    if not np.isfinite(matrix).all():
+        raise SchemaError(f"{matrix_name} must contain only finite values.")
+    if (matrix < 0.0).any():
+        raise SchemaError(f"{matrix_name} must be nonnegative.")
+    if not np.allclose(matrix, matrix.T, rtol=1e-7, atol=1e-12):
+        raise SchemaError(f"{matrix_name} must be symmetric.")
+    if not np.array_equal(np.diag(matrix), np.zeros(matrix.shape[0])):
+        raise SchemaError(f"{matrix_name} diagonal must be exactly zero.")
 
 
 def _validate_fa_bounds(fa_min: float, fa_max: float) -> None:
