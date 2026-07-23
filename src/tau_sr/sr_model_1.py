@@ -4,13 +4,16 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from pysr import PySRRegressor
+from tau_sr.schemas import DEFAULT_N_ROIS
 
 # define variables
 
 # load variables as torch.tensor, also need to input train_test_split on variables later
 
-W = torch.tensor('N/A')     # define W as a pytorch tensor from loaded data
+W = torch.zeros((DEFAULT_N_ROIS, DEFAULT_N_ROIS), dtype=torch.float32)
+region_indices = torch.arange(DEFAULT_N_ROIS - 1)
+W[region_indices, region_indices + 1] = 1.0
+W[region_indices + 1, region_indices] = 1.0
 D = torch.diag(W.sum(dim=1))
 
 L = D-W
@@ -85,8 +88,16 @@ def train(model, y0, dt, y_target, epochs=100, lr=1e-3):
 # symbolic regression model
 
 def sr(model):
+    from pysr import PySRRegressor
 
-    y_samples = torch.linspace(0, 5, 500).unsqueeze(-1)
+    reaction_parameter = next(model.reaction_eq.parameters())
+    y_samples = torch.linspace(
+        0,
+        5,
+        500,
+        device=reaction_parameter.device,
+        dtype=reaction_parameter.dtype,
+    ).unsqueeze(-1)
     model.eval()
     with torch.no_grad():
         r_pred = (
@@ -104,7 +115,7 @@ def sr(model):
         model_selection="best"
     )
 
-    sr_model.fit(y_samples.numpy(), r_pred)
+    sr_model.fit(y_samples.detach().cpu().numpy(), r_pred)
 
     print('Symbolic Regression Model for r_m(y):')
     print(sr_model)
