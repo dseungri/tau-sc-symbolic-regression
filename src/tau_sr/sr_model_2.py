@@ -1,39 +1,102 @@
 # import libraries
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from schemas import DEFAULT_N_ROIS
 from sklearn.model_selection import train_test_split
+import numpy as np
 
+from synthetic import (
+    SyntheticCohortConfig,
+    build_connectome_representations,
+    generate_count_connectome,
+    generate_edge_attributes,
+    generate_synthetic_roi_labels,
+)
 
-# define variables
+# Set global random seeds for reproducibility
+TORCH_SEED = 42
+torch.manual_seed(TORCH_SEED)
+np.random.seed(TORCH_SEED)
 
-# load variables as torch.tensor, also need to input train_test_split on variables later
+def load_synthetic_dataset(config: SyntheticCohortConfig):
+    """Generates structural graph representations and synthetic longitudinal Tau data."""
+    rng = np.random.default_rng(config.seed)
 
-num_subjects = 32
+    # Generate graph connectivity structure
+    count_matrix = generate_count_connectome(
+        config.n_regions, rng, edge_probability=config.edge_probability
+    )
+    fa_matrix, length_matrix = generate_edge_attributes(count_matrix, rng)
+    connectomes = build_connectome_representations(
+        count_matrix, fa_matrix, length_matrix
+    )
 
-# generate synthetic tau SUVR data
-y0 = torch.rand(num_subjects, 148) * 2.0 + 0.5
-dt = torch.rand(num_subjects, 1) * 2.0 + 1.0
-y_target = y0 + (0.08 * y0 * dt) + torch.randn_like(y0) * 0.02
+    # Build Graph Laplacian (L = D - A) using length-adjusted network
+    A = connectomes["length_adjusted"]
+    D = np.diag(A.sum(axis=1))
+    L_np = D - A
+    L_tensor = torch.from_numpy(L_np).float()
+
+    # Generate baseline Tau SUVR [N_subjects, N_regions]
+    y0_np = rng.uniform(
+        config.baseline_tau_min,
+        config.baseline_tau_max,
+        size=(config.n_subjects, config.n_regions),
+    )
+    y0 = torch.from_numpy(y0_np).float()
+
+    # Time intervals between visits (e.g., 1 to 3 years)
+    dt = torch.from_numpy(
+        rng.uniform(1.0, 3.0, size=(config.n_subjects, 1))
+    ).float()
+
+    # Create Ground Truth Target Data using a known biological reaction law:
+    # r_true(y) = 0.15 * y * (1 - y / 3.5)
+    # Target is generated via simple forward Euler steps
+    with torch.no_grad():
+        y_sim = y0.clone()
+        n_steps = 20
+        for i in range(config.n_subjects):
+            step_size = dt[i].item() / n_steps
+            for _ in range(n_steps):
+                # dy/dt = -0.05 * (y @ L^T) + 0.15 * y * (1 - y / 3.5)
+                diffusion = -0.05 * torch.matmul(y_sim[i : i + 1], L_tensor.T)
+                reaction = 0.15 * y_sim[i : i + 1] * (1 - y_sim[i : i + 1] / 3.5)
+                dydt = diffusion + reaction
+                y_sim[i : i + 1] += step_size * dydt
+
+        if config.add_observation_noise:
+            y_sim += torch.randn_like(y_sim) * config.observation_noise_std
+
+    y_target = y_sim
+
+    # Fetch ROI labels for regional indexing
+    roi_labels = generate_synthetic_roi_labels(config)
+
+    return L_tensor, y0, dt, y_target, roi_labels
+
+config = SyntheticCohortConfig(
+        n_subjects=24,
+        n_regions=148,
+        visits_per_subject=2,
+        seed=42,
+        baseline_tau_min=0.2,
+        baseline_tau_max=3.0,
+    )
+
+L, y0, dt, y_target, roi_labels = load_synthetic_dataset(config)
 
 indices = list(range(len(y0)))
-train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
+train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=TORCH_SEED)
 
 # Slice tensors by subject indices
 train_y0, test_y0 = y0[train_idx], y0[test_idx]
 train_dt, test_dt = dt[train_idx], dt[test_idx]
 train_y_target, test_y_target = y_target[train_idx], y_target[test_idx]
-
-
-W = torch.zeros((DEFAULT_N_ROIS, DEFAULT_N_ROIS), dtype=torch.float32)
-region_indices = torch.arange(DEFAULT_N_ROIS - 1)
-W[region_indices, region_indices + 1] = 1.0
-W[region_indices + 1, region_indices] = 1.0
-D = torch.diag(W.sum(dim=1))
-
-L = D-W
 
 # define reaction diffusion ODE using NN
 
