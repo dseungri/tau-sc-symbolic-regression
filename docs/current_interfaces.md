@@ -359,3 +359,72 @@ trajectory arrays. It does not generate baselines or connectomes, choose a
 ground-truth reaction law, add observation noise, split subjects into training
 and test sets, or apply clipping, nonnegativity projection, or biological bounds.
 It can later accept validated arrays derived from real data.
+
+### Synthetic Linear-Quadratic Reaction Law
+
+Defined in `reactions.py`
+
+```python
+make_linear_quadratic_reaction(
+    growth_rate: float,
+    saturation_rate: float,
+) -> Callable[[np.ndarray], np.ndarray]
+```
+
+This factory constructs the controlled synthetic ground-truth reaction law for
+pipeline-recovery validation:
+
+```python
+r(y) = growth_rate * y - saturation_rate * y**2
+```
+
+`growth_rate` is the positive linear growth coefficient. `saturation_rate` is
+the nonnegative quadratic saturation coefficient. When `saturation_rate == 0`,
+the returned law is the linear-control case:
+
+```python
+r(y) = growth_rate * y
+```
+
+When `saturation_rate > 0`, the positive equilibrium is:
+
+```python
+K = growth_rate / saturation_rate
+```
+
+The returned callable has the standard reaction contract:
+
+```python
+reaction_fn(y: np.ndarray) -> np.ndarray
+```
+
+The state `y` must be a one-dimensional, nonempty, finite, real numeric NumPy
+array with shape `(R,)`. The output is a newly allocated floating NumPy array
+with the same shape `(R,)`. The callable does not mutate `y`, does not share
+memory with `y`, uses no randomness, and validates that computed reaction values
+remain finite.
+
+Both coefficients are validated before construction. `growth_rate` must be
+finite, real numeric, non-Boolean, and strictly positive. `saturation_rate` must
+be finite, real numeric, non-Boolean, and nonnegative. Invalid coefficients,
+invalid states, or nonfinite computed reaction values raise `SchemaError`.
+
+The polynomial form is deliberately compatible with the restricted symbolic
+operator set:
+
+```python
+[
+    "+",
+    "-",
+    "*",
+]
+```
+
+This reaction law does not include diffusion, integrate trajectories, generate
+baselines or connectomes, add observation noise, estimate parameters, run
+symbolic regression, or apply clipping or biological bounds. The coefficients
+are software-controlled synthetic parameters, not biological estimates or
+patient-specific measurements. Recovery experiments should choose coefficients
+so curvature is visible in the simulated state range, trajectories remain
+finite and numerically stable, and reaction and diffusion terms have comparable,
+inspectable magnitudes.
