@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 from tau_sr.schemas import SchemaError
-from tau_sr.simulation import simulate_reaction_diffusion_trajectory
+from tau_sr.simulation import (
+    simulate_reaction_diffusion_cohort,
+    simulate_reaction_diffusion_trajectory,
+)
 
 
 def _zero_reaction(state: np.ndarray) -> np.ndarray:
@@ -15,9 +18,23 @@ def _two_node_laplacian() -> np.ndarray:
     return np.array([[1.0, -1.0], [-1.0, 1.0]])
 
 
+def _scaled_two_node_laplacian(scale: float) -> np.ndarray:
+    return scale * _two_node_laplacian()
+
+
 def _two_node_diffusion_solution(times: np.ndarray, rho: float) -> np.ndarray:
     delta_t = times - times[0]
     decay = np.exp(-2.0 * rho * delta_t)
+    return np.column_stack((0.5 + 0.5 * decay, 0.5 - 0.5 * decay))
+
+
+def _scaled_two_node_diffusion_solution(
+    times: np.ndarray,
+    rho: float,
+    scale: float,
+) -> np.ndarray:
+    delta_t = times - times[0]
+    decay = np.exp(-2.0 * rho * scale * delta_t)
     return np.column_stack((0.5 + 0.5 * decay, 0.5 - 0.5 * decay))
 
 
@@ -384,3 +401,464 @@ def test_simulation_does_not_mutate_numpy_legacy_global_rng_state() -> None:
     )
 
     np.testing.assert_array_equal(np.random.random(5), expected_draws)
+
+
+def test_cohort_basic_behavior_preserves_subject_order_and_visit_counts() -> None:
+    baseline_states = np.array(
+        [
+            [1.0, 0.0],
+            [2.0, 2.0],
+            [0.0, 1.0],
+        ]
+    )
+    times_by_subject = (
+        np.array([0.0, 0.2]),
+        np.array([1.0, 1.5, 2.0]),
+        np.array([-1.0]),
+    )
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        np.zeros((3, 2, 2)),
+        0.0,
+        _zero_reaction,
+    )
+
+    assert len(trajectories) == 3
+    assert [trajectory.shape for trajectory in trajectories] == [(2, 2), (3, 2), (1, 2)]
+    for subject_index, trajectory in enumerate(trajectories):
+        np.testing.assert_array_equal(trajectory[0], baseline_states[subject_index])
+        np.testing.assert_allclose(
+            trajectory,
+            np.tile(baseline_states[subject_index], (trajectory.shape[0], 1)),
+        )
+
+
+def test_one_subject_cohort_works() -> None:
+    trajectories = simulate_reaction_diffusion_cohort(
+        np.array([[0.1, 0.2]]),
+        (np.array([0.0, 0.5]),),
+        np.zeros((1, 2, 2)),
+        0.0,
+        lambda state: np.ones_like(state),
+    )
+
+    assert len(trajectories) == 1
+    np.testing.assert_allclose(trajectories[0], np.array([[0.1, 0.2], [0.6, 0.7]]))
+
+
+def test_one_visit_cohort_subject_does_not_call_reaction_for_that_subject() -> None:
+    calls: list[float] = []
+
+    def reaction_fn(state: np.ndarray) -> np.ndarray:
+        calls.append(float(state[0]))
+        return np.zeros_like(state)
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        np.array([[0.0, 0.0], [10.0, 10.0]]),
+        (np.array([0.0, 0.1]), np.array([5.0])),
+        np.zeros((2, 2, 2)),
+        0.0,
+        reaction_fn,
+    )
+
+    np.testing.assert_array_equal(trajectories[1], np.array([[10.0, 10.0]]))
+    assert calls
+    assert all(call == 0.0 for call in calls)
+
+
+def test_cohort_accepts_fixed_visit_time_matrix_and_148_regions() -> None:
+    baseline_states = np.vstack(
+        [
+            np.linspace(0.05, 0.40, 148),
+            np.linspace(0.10, 0.45, 148),
+        ]
+    )
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        np.array([[0.0, 0.25], [1.0, 1.25]]),
+        np.zeros((2, 148, 148)),
+        0.0,
+        _zero_reaction,
+    )
+
+    assert len(trajectories) == 2
+    assert trajectories[0].shape == (2, 148)
+    assert trajectories[1].shape == (2, 148)
+    np.testing.assert_array_equal(trajectories[0][0], baseline_states[0])
+    np.testing.assert_array_equal(trajectories[1][0], baseline_states[1])
+
+
+def test_cohort_uses_subject_specific_laplacians_in_order() -> None:
+    baseline_states = np.tile(np.array([1.0, 0.0]), (3, 1))
+    times_by_subject = (np.array([0.0, 1.0]),) * 3
+    laplacians = np.stack(
+        [
+            _scaled_two_node_laplacian(1.0),
+            _scaled_two_node_laplacian(2.0),
+            _scaled_two_node_laplacian(3.0),
+        ]
+    )
+    rho = 0.2
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        laplacians,
+        rho,
+        _zero_reaction,
+        max_step=0.0025,
+    )
+
+    for scale, trajectory in zip((1.0, 2.0, 3.0), trajectories, strict=True):
+        np.testing.assert_allclose(
+            trajectory,
+            _scaled_two_node_diffusion_solution(times_by_subject[0], rho, scale),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+    assert not np.allclose(trajectories[0], trajectories[1])
+    assert not np.allclose(trajectories[1], trajectories[2])
+
+
+@pytest.mark.parametrize(
+    ("laplacians", "message"),
+    [
+        (np.zeros((2, 2)), "three-dimensional"),
+        (np.zeros((1, 2, 2)), "expected"),
+        (np.zeros((2, 3, 3)), "expected"),
+        (np.zeros((2, 2, 3)), "expected"),
+        (np.zeros((2, 2, 2), dtype=bool), "real numeric"),
+        (np.zeros((2, 2, 2), dtype=complex), "real numeric"),
+        (np.array([[[0.0, np.nan], [0.0, 0.0]], [[0.0, 0.0], [0.0, 0.0]]]), "finite"),
+    ],
+)
+def test_cohort_rejects_invalid_laplacian_inputs(
+    laplacians: object,
+    message: str,
+) -> None:
+    with pytest.raises(SchemaError, match=message):
+        simulate_reaction_diffusion_cohort(
+            np.ones((2, 2)),
+            (np.array([0.0]), np.array([0.0])),
+            laplacians,  # type: ignore[arg-type]
+            0.0,
+            _zero_reaction,
+        )
+
+
+def test_cohort_supports_different_visit_schedules_without_extra_rows() -> None:
+    times_by_subject = (
+        np.array([-1.0, -0.3, 0.4]),
+        np.array([2.0, 2.12]),
+        np.array([10.0, 10.03, 10.17, 10.40]),
+    )
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        np.zeros((3, 2)),
+        times_by_subject,
+        np.zeros((3, 2, 2)),
+        0.0,
+        lambda state: np.ones_like(state),
+        max_step=0.05,
+    )
+
+    assert [trajectory.shape for trajectory in trajectories] == [(3, 2), (2, 2), (4, 2)]
+    for times, trajectory in zip(times_by_subject, trajectories, strict=True):
+        expected = (times - times[0])[:, None] * np.ones(2)
+        np.testing.assert_allclose(trajectory, expected, atol=1e-12)
+
+
+def test_cohort_reaction_only_linear_solution_matches_exponential() -> None:
+    growth_rate = 0.25
+    baseline_states = np.array([[1.0, 2.0], [0.5, 1.5], [3.0, -1.0]])
+    times_by_subject = (
+        np.array([0.0, 0.25, 1.0]),
+        np.array([2.0, 2.5]),
+        np.array([-1.0, -0.5, 0.25]),
+    )
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        np.zeros((3, 2, 2)),
+        0.0,
+        lambda state: growth_rate * state,
+        max_step=0.005,
+    )
+
+    for y0, times, trajectory in zip(baseline_states, times_by_subject, trajectories, strict=True):
+        expected = y0 * np.exp(growth_rate * (times - times[0]))[:, None]
+        np.testing.assert_allclose(trajectory, expected, rtol=1e-9, atol=1e-11)
+
+
+def test_cohort_diffusion_only_matches_analytical_solution_and_conserves_mass() -> None:
+    rho = 0.3
+    times_by_subject = (np.array([0.0, 0.4]), np.array([1.0, 1.2, 1.8]))
+    scales = (1.0, 0.5)
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        np.tile(np.array([1.0, 0.0]), (2, 1)),
+        times_by_subject,
+        np.stack([_scaled_two_node_laplacian(scale) for scale in scales]),
+        rho,
+        _zero_reaction,
+        max_step=0.0025,
+    )
+
+    for scale, times, trajectory in zip(scales, times_by_subject, trajectories, strict=True):
+        np.testing.assert_allclose(
+            trajectory,
+            _scaled_two_node_diffusion_solution(times, rho, scale),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(trajectory.sum(axis=1), 1.0, atol=1e-12)
+
+
+def test_cohort_combined_linear_reaction_and_diffusion_matches_exact_solution() -> None:
+    rho = 0.25
+    growth_rate = 0.15
+    times_by_subject = (np.array([0.0, 0.5]), np.array([2.0, 2.4, 2.8]))
+    scales = (1.0, 2.0)
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        np.tile(np.array([1.0, 0.0]), (2, 1)),
+        times_by_subject,
+        np.stack([_scaled_two_node_laplacian(scale) for scale in scales]),
+        rho,
+        lambda state: growth_rate * state,
+        max_step=0.0025,
+    )
+
+    for scale, times, trajectory in zip(scales, times_by_subject, trajectories, strict=True):
+        reaction_scale = np.exp(growth_rate * (times - times[0]))[:, None]
+        expected = _scaled_two_node_diffusion_solution(times, rho, scale) * reaction_scale
+        np.testing.assert_allclose(trajectory, expected, rtol=1e-10, atol=1e-12)
+
+
+def test_cohort_uses_shared_reaction_callable_for_every_subject() -> None:
+    seen_baselines: list[float] = []
+
+    def reaction_fn(state: np.ndarray) -> np.ndarray:
+        seen_baselines.append(float(state[0]))
+        return np.zeros_like(state)
+
+    simulate_reaction_diffusion_cohort(
+        np.array([[1.0, 0.0], [2.0, 0.0]]),
+        (np.array([0.0, 0.1]), np.array([0.0, 0.1])),
+        np.zeros((2, 2, 2)),
+        0.0,
+        reaction_fn,
+    )
+
+    assert 1.0 in seen_baselines
+    assert 2.0 in seen_baselines
+
+
+def test_cohort_preserves_inputs_and_allocates_independent_outputs_under_mutation() -> None:
+    baseline_states = np.array([[1.0, 2.0], [3.0, 4.0]])
+    laplacians = np.zeros((2, 2, 2))
+    times_by_subject = [np.array([0.0, 0.1]), np.array([1.0, 1.2])]
+    baseline_before = baseline_states.copy()
+    laplacians_before = laplacians.copy()
+    times_before = [times.copy() for times in times_by_subject]
+
+    def mutating_reaction(state: np.ndarray) -> np.ndarray:
+        state[:] = -1000.0
+        return np.array([1.0, -1.0])
+
+    trajectories = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        laplacians,
+        0.0,
+        mutating_reaction,
+        max_step=0.05,
+    )
+
+    np.testing.assert_array_equal(baseline_states, baseline_before)
+    np.testing.assert_array_equal(laplacians, laplacians_before)
+    for times, expected_times in zip(times_by_subject, times_before, strict=True):
+        np.testing.assert_array_equal(times, expected_times)
+    assert all(not np.shares_memory(trajectory, baseline_states) for trajectory in trajectories)
+    assert not np.shares_memory(trajectories[0], trajectories[1])
+    for y0, times, trajectory in zip(baseline_before, times_before, trajectories, strict=True):
+        expected = y0 + (times - times[0])[:, None] * np.array([1.0, -1.0])
+        np.testing.assert_allclose(trajectory, expected)
+
+
+def test_cohort_is_deterministic_and_does_not_mutate_numpy_legacy_rng_state() -> None:
+    baseline_states = np.array([[1.0, 0.0], [0.0, 1.0]])
+    times_by_subject = (np.array([0.0, 0.2]), np.array([1.0, 1.4]))
+    laplacians = np.stack([_two_node_laplacian(), _scaled_two_node_laplacian(2.0)])
+
+    np.random.seed(456)
+    expected_draws = np.random.random(5)
+    np.random.seed(456)
+
+    first = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        laplacians,
+        0.2,
+        lambda state: 0.1 * state,
+        max_step=0.01,
+    )
+    second = simulate_reaction_diffusion_cohort(
+        baseline_states,
+        times_by_subject,
+        laplacians,
+        0.2,
+        lambda state: 0.1 * state,
+        max_step=0.01,
+    )
+
+    for first_trajectory, second_trajectory in zip(first, second, strict=True):
+        np.testing.assert_array_equal(first_trajectory, second_trajectory)
+    np.testing.assert_array_equal(np.random.random(5), expected_draws)
+
+
+def test_cohort_applies_no_clipping_nonnegativity_projection_or_noise() -> None:
+    inputs = (
+        np.array([[0.3, 0.2], [0.4, 0.1]]),
+        (np.array([0.0, 1.0]), np.array([2.0, 3.0])),
+        np.zeros((2, 2, 2)),
+        0.0,
+        lambda _state: np.array([1.1, -1.1]),
+    )
+
+    first = simulate_reaction_diffusion_cohort(*inputs)
+    second = simulate_reaction_diffusion_cohort(*inputs)
+
+    for first_trajectory, second_trajectory in zip(first, second, strict=True):
+        assert first_trajectory[-1, 0] > 1.0
+        assert first_trajectory[-1, 1] < 0.0
+        np.testing.assert_array_equal(first_trajectory, second_trajectory)
+
+
+@pytest.mark.parametrize(
+    ("baseline_states", "message"),
+    [
+        ([[1.0, 2.0]], "NumPy"),
+        (np.array([1.0, 2.0]), "two-dimensional"),
+        (np.zeros((0, 2)), "one subject"),
+        (np.zeros((2, 1)), "two regions"),
+        (np.array([[True, False], [False, True]]), "real numeric"),
+        (np.array([["1.0", "2.0"], ["3.0", "4.0"]]), "real numeric"),
+        (np.array([[1.0, 2.0], [3.0, 4.0]], dtype=object), "real numeric"),
+        (np.array([[1.0 + 0.0j, 2.0], [3.0, 4.0]]), "real numeric"),
+        (np.array([[1.0, np.nan], [3.0, 4.0]]), "finite"),
+        (np.array([[1.0, np.inf], [3.0, 4.0]]), "finite"),
+    ],
+)
+def test_cohort_rejects_invalid_baseline_states(
+    baseline_states: object,
+    message: str,
+) -> None:
+    with pytest.raises(SchemaError, match=message):
+        simulate_reaction_diffusion_cohort(
+            baseline_states,  # type: ignore[arg-type]
+            (np.array([0.0]), np.array([0.0])),
+            np.zeros((2, 2, 2)),
+            0.0,
+            _zero_reaction,
+        )
+
+
+@pytest.mark.parametrize(
+    ("times_by_subject", "message"),
+    [
+        ((np.array([0.0]),), "expected 2"),
+        ((np.array([0.0]), np.array([0.0]), np.array([0.0])), "expected 2"),
+        ("not-times", "times_by_subject"),
+        (np.array([0.0, 1.0]), "two-dimensional"),
+        ((np.array([0.0]), [0.0]), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([[0.0, 1.0]])), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([], dtype=float)), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([False, True])), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([0.0, np.nan])), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([0.0, 0.0])), r"times_by_subject\[1\]"),
+        ((np.array([0.0]), np.array([1.0, 0.0])), r"times_by_subject\[1\]"),
+    ],
+)
+def test_cohort_rejects_invalid_times_by_subject(
+    times_by_subject: object,
+    message: str,
+) -> None:
+    with pytest.raises(SchemaError, match=message):
+        simulate_reaction_diffusion_cohort(
+            np.ones((2, 2)),
+            times_by_subject,  # type: ignore[arg-type]
+            np.zeros((2, 2, 2)),
+            0.0,
+            _zero_reaction,
+        )
+
+
+def test_cohort_outer_validation_happens_before_reaction_calls() -> None:
+    calls = 0
+
+    def reaction_fn(state: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.zeros_like(state)
+
+    with pytest.raises(SchemaError, match=r"times_by_subject\[1\]"):
+        simulate_reaction_diffusion_cohort(
+            np.ones((2, 2)),
+            (np.array([0.0, 0.1]), np.array([0.0, 0.0])),
+            np.zeros((2, 2, 2)),
+            0.0,
+            reaction_fn,
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"rho": -0.1}, "rho"),
+        ({"rho": np.inf}, "rho"),
+        ({"rho": True}, "rho"),
+        ({"reaction_fn": None}, "reaction_fn"),
+        ({"max_step": 0.0}, "max_step"),
+        ({"max_step": np.nan}, "max_step"),
+        ({"max_step": False}, "max_step"),
+    ],
+)
+def test_cohort_rejects_invalid_shared_parameters(
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    inputs = {
+        "baseline_states": np.ones((2, 2)),
+        "times_by_subject": (np.array([0.0]), np.array([0.0])),
+        "laplacians": np.zeros((2, 2, 2)),
+        "rho": 0.0,
+        "reaction_fn": _zero_reaction,
+        "max_step": 0.05,
+    }
+    inputs.update(kwargs)
+
+    with pytest.raises(SchemaError, match=message):
+        simulate_reaction_diffusion_cohort(**inputs)  # type: ignore[arg-type]
+
+
+def test_cohort_invalid_reaction_output_reports_subject_index() -> None:
+    def reaction_fn(state: np.ndarray) -> np.ndarray:
+        if state[0] > 5.0:
+            return np.ones((1, 2))
+        return np.zeros_like(state)
+
+    with pytest.raises(SchemaError, match=r"subject index 1.*reaction_fn output"):
+        simulate_reaction_diffusion_cohort(
+            np.array([[1.0, 0.0], [10.0, 0.0]]),
+            (np.array([0.0, 0.1]), np.array([0.0, 0.1])),
+            np.zeros((2, 2, 2)),
+            0.0,
+            reaction_fn,
+        )

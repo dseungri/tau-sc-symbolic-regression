@@ -289,3 +289,73 @@ Validation is
 delegated to `make_reaction_diffusion_rhs` and `integrate_rk4`; invalid inputs,
 invalid reaction outputs, or nonfinite computed derivatives raise `SchemaError`.
 
+### Noise-free reaction-diffusion cohort
+
+Defined in `simulation.py`
+
+```python
+simulate_reaction_diffusion_cohort(
+    baseline_states: np.ndarray,
+    times_by_subject: Sequence[np.ndarray],
+    laplacians: np.ndarray,
+    rho: float,
+    reaction_fn,
+    *,
+    max_step=0.05,
+) -> tuple[np.ndarray, ...]
+```
+
+One call simulates a cohort of `S` subjects with `R` regions. Inputs use:
+
+```python
+baseline_states.shape == (S, R)
+laplacians.shape == (S, R, R)
+len(times_by_subject) == S
+times_by_subject[s].shape == (T_s,)
+```
+
+The return value is an ordered tuple because subjects may have different numbers
+of visits:
+
+```python
+trajectories[s].shape == (T_s, R)
+```
+
+Subject index `s` is positional and must refer to the same subject across
+`baseline_states[s]`, `laplacians[s]`, `times_by_subject[s]`, and
+`trajectories[s]`. ROI index `i` is also positional:
+
+```python
+baseline_states[s, i]
+    <-> laplacians[s, i, :]
+    <-> laplacians[s, :, i]
+    <-> trajectories[s][:, i]
+    <-> roi_labels[i]
+```
+
+The function requires one Laplacian per subject and does not broadcast a single
+two-dimensional Laplacian or use a group-average network. `rho` and
+`reaction_fn` are shared across the cohort, while baseline states, Laplacians,
+and observation-time arrays are subject-specific.
+
+Each time array must follow the single-subject time contract: one-dimensional,
+nonempty, finite, real numeric, and strictly increasing when it has multiple
+entries. Subjects may have irregular visits, different baseline absolute times,
+and different numbers of visits. A two-dimensional NumPy `times_by_subject`
+array is accepted as a fixed-visit convenience, where each row is one subject's
+time array.
+
+The cohort simulator reuses `simulate_reaction_diffusion_trajectory` once per
+subject. It does not reimplement RK4 and does not reimplement the
+reaction-diffusion RHS. It validates cohort-level shapes and all time arrays
+before beginning simulation when the invalidity is knowable from outer inputs.
+If a lower-level per-subject simulation raises `SchemaError`, the cohort error
+message includes the subject index and preserves the original error as the
+exception cause.
+
+The function is deterministic and noise-free, uses no random state, preserves
+caller-owned baseline, Laplacian, and time arrays, and returns newly allocated
+trajectory arrays. It does not generate baselines or connectomes, choose a
+ground-truth reaction law, add observation noise, split subjects into training
+and test sets, or apply clipping, nonnegativity projection, or biological bounds.
+It can later accept validated arrays derived from real data.
