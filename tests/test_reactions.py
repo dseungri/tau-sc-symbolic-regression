@@ -90,14 +90,18 @@ def test_repeated_reaction_calls_are_deterministic_and_independent() -> None:
 
 
 def test_factory_and_reaction_do_not_mutate_numpy_legacy_global_rng_state() -> None:
-    np.random.seed(123)
-    expected_draws = np.random.random(5)
-    np.random.seed(123)
+    previous_rng_state = np.random.get_state()
+    try:
+        np.random.seed(123)
+        expected_draws = np.random.random(5)
+        np.random.seed(123)
 
-    reaction_fn = make_linear_quadratic_reaction(0.5, 0.5)
-    reaction_fn(np.array([0.2, 0.4]))
+        reaction_fn = make_linear_quadratic_reaction(0.5, 0.5)
+        reaction_fn(np.array([0.2, 0.4]))
 
-    np.testing.assert_array_equal(np.random.random(5), expected_draws)
+        np.testing.assert_array_equal(np.random.random(5), expected_draws)
+    finally:
+        np.random.set_state(previous_rng_state)
 
 
 @pytest.mark.parametrize(
