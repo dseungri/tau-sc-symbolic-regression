@@ -638,6 +638,152 @@ device and with the same dtype as `y0`; values must be strictly increasing when
 more than one time is supplied. `max_step` is a finite positive scalar used as
 the maximum RK4 substep size.
 
+### Neural synthetic-recovery training
+
+Defined in `training.py`
+
+```python
+@dataclass(frozen=True)
+class SubjectSplit:
+    train_indices: tuple[int, ...]
+    validation_indices: tuple[int, ...]
+    test_indices: tuple[int, ...]
+
+make_subject_split(
+    n_subjects: int,
+    *,
+    validation_fraction: float,
+    test_fraction: float,
+    seed: int,
+) -> SubjectSplit
+```
+
+Splits are subject-level only. Visits and ROIs from one subject are never split
+across partitions. The deterministic splitter uses `np.random.default_rng(seed)`,
+does not touch NumPy's legacy global RNG, returns nonempty train, validation, and
+test sets, and requires the three sets to be disjoint, complete, and in range.
+
+```python
+@dataclass(frozen=True)
+class NeuralTrainingConfig:
+    hidden_width: int = 16
+    initial_rho: float = 0.05
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    max_epochs: int = 500
+    patience: int = 50
+    min_delta: float = 1e-7
+    max_step: float = 0.05
+    seed: int = 42
+    dtype: torch.dtype = torch.float64
+    device: str = "cpu"
+```
+
+Configuration validation requires positive integer width, epoch, and patience
+values; positive finite initial `rho`, learning rate, and `max_step`;
+nonnegative finite weight decay and `min_delta`; a non-Boolean integer seed; a
+real floating PyTorch dtype; and an available requested device. There is no
+silent fallback from unavailable accelerators.
+
+```python
+@dataclass(frozen=True)
+class NeuralTrainingResult:
+    model: NeuralReactionDiffusion
+    split: SubjectSplit
+    training_losses: tuple[float, ...]
+    validation_losses: tuple[float, ...]
+    best_epoch: int
+    epochs_run: int
+
+fit_noise_free_recovery_model(
+    dataset: SyntheticRecoveryDataset,
+    split: SubjectSplit,
+    config: NeuralTrainingConfig,
+) -> NeuralTrainingResult
+```
+
+`fit_noise_free_recovery_model` constructs a fresh canonical
+`NeuralReactionDiffusion` from `config.hidden_width` and `config.initial_rho`.
+Initialization is scoped with PyTorch RNG forking and `config.seed`, so fitting
+does not permanently change the caller's PyTorch RNG state. The model is moved
+explicitly to the configured device and dtype.
+
+Training uses only synthetic trajectories from `SyntheticRecoveryDataset`.
+For each train or validation subject, the tensors supplied to the model are:
+
+```python
+baseline_states[s]  -> y0
+laplacians[s]       -> L_s
+times_by_subject[s] -> times
+trajectories[s]     -> target
+```
+
+Adjacency matrices, subject IDs, ROI labels, true `rho`, `growth_rate`, and
+`saturation_rate` are not learned inputs and are not part of the optimization
+loss. The two real pilot subjects are not used by this interface.
+
+The trajectory loss excludes the baseline row because that row is supplied as
+the initial condition:
+
+```python
+subject_loss = mean((predicted[1:] - target[1:])**2)
+training_loss = mean(subject_loss over training subjects)
+```
+
+This subject-balanced aggregation prevents subjects with more visits from
+automatically dominating training. Train and validation subjects must have at
+least two visits. Test-subject trajectories are not used for optimization,
+validation, early stopping, hyperparameter selection, or model-state selection.
+
+Each epoch uses Adam, verifies finite training loss, finite gradients, finite
+model parameters after the optimizer step, and finite validation loss. The best
+validation state is cloned in memory when validation improves by more than
+`min_delta`; training stops after `patience` consecutive non-improving epochs.
+The returned model is restored to the best validation-loss state. No checkpoint
+files are written.
+
+```python
+@dataclass(frozen=True)
+class NeuralRecoveryMetrics:
+    subject_indices: tuple[int, ...]
+    trajectory_mse: float
+    trajectory_rmse: float
+    trajectory_mae: float
+    estimated_rho: float
+    true_rho: float
+    rho_absolute_error: float
+    rho_relative_error: float
+    reaction_curve_rmse: float
+    reaction_curve_mae: float
+
+evaluate_neural_recovery(
+    model: NeuralReactionDiffusion,
+    dataset: SyntheticRecoveryDataset,
+    subject_indices: Sequence[int],
+    reaction_grid: np.ndarray,
+    *,
+    max_step: float,
+    device: str = "cpu",
+    dtype: torch.dtype = torch.float64,
+) -> NeuralRecoveryMetrics
+```
+
+Evaluation sets the model to eval mode under `torch.no_grad()` and restores the
+prior training/eval mode when finished. Trajectory metrics are subject-balanced
+over the requested subject indices and also exclude baseline rows. The true
+synthetic parameters are used only after fitting to calculate recovery metrics:
+`estimated_rho = model.rho`, `true_rho = dataset.rho`, absolute rho error,
+relative rho error for positive true `rho`, and neural reaction-curve RMSE/MAE
+against the known linear-quadratic law.
+
+The caller supplies `reaction_grid`. For strict recovery reporting, derive that
+grid from training-subject state values only, then reuse it unchanged for train,
+validation, and test metrics. The grid must be one-dimensional, nonempty, real
+floating, finite, and strictly increasing, and it is converted freshly to the
+model's requested dtype and device. Symbolic regression is not run in this phase,
+and neither `sr_model_1.py` nor `sr_model_2.py` is imported by the training
+workflow.
+
 ### Symbolic neural-reaction distillation
 
 Defined in `symbolic.py`
