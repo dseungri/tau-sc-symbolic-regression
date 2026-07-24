@@ -428,3 +428,212 @@ patient-specific measurements. Recovery experiments should choose coefficients
 so curvature is visible in the simulated state range, trajectories remain
 finite and numerically stable, and reaction and diffusion terms have comparable,
 inspectable magnitudes.
+
+### Noise-free synthetic recovery dataset
+
+Defined in `recovery.py`
+
+```python
+@dataclass(frozen=True)
+class SyntheticRecoveryDataset:
+    subject_ids: tuple[str, ...]
+    roi_labels: tuple[str, ...]
+    baseline_states: np.ndarray
+    adjacencies: np.ndarray
+    laplacians: np.ndarray
+    times_by_subject: tuple[np.ndarray, ...]
+    trajectories: tuple[np.ndarray, ...]
+    representation: str
+    laplacian_kind: str
+    rho: float
+    growth_rate: float
+    saturation_rate: float
+    seed: int
+```
+
+```python
+build_noise_free_recovery_dataset(
+    config: SyntheticCohortConfig,
+    times_by_subject: Sequence[np.ndarray],
+    *,
+    representation: str,
+    laplacian_kind: str,
+    rho: float,
+    growth_rate: float,
+    saturation_rate: float,
+    max_step=0.05,
+) -> SyntheticRecoveryDataset
+```
+
+The builder assembles controlled synthetic data for recovery validation only.
+It contains no patient observations, performs no model training, performs no
+symbolic regression, and performs no file serialization. The coefficients are
+software-controlled ground-truth parameters, not biological estimates.
+
+For `S = config.n_subjects` and `R = config.n_regions`, output shapes are:
+
+```python
+baseline_states.shape == (S, R)
+adjacencies.shape == (S, R, R)
+laplacians.shape == (S, R, R)
+len(times_by_subject) == S
+trajectories[s].shape == (T_s, R)
+len(subject_ids) == S
+len(roi_labels) == R
+```
+
+Subject IDs are stable synthetic identifiers:
+
+```python
+synthetic_subject_0000
+synthetic_subject_0001
+```
+
+ROI labels come from `generate_synthetic_roi_labels`. Subject index `s` and ROI
+index `i` are positional and must stay aligned:
+
+```python
+baseline_states[s, i]
+    <-> adjacencies[s, i, :]
+    <-> laplacians[s, i, :]
+    <-> trajectories[s][:, i]
+    <-> roi_labels[i]
+```
+
+The builder uses exactly one local `np.random.default_rng(config.seed)` and lets
+that generator advance through the existing tested helpers. Each subject gets an
+independently generated count connectome, aligned FA and length attributes, the
+explicitly requested adjacency representation, an independently constructed
+Laplacian of the explicitly requested kind, and a subject-specific baseline tau
+state.
+
+The shared ground-truth dynamics are:
+
+```python
+dy_s_dt = -rho * (laplacians[s] @ y_s) + growth_rate * y_s - saturation_rate * y_s**2
+```
+
+One shared nonnegative `rho` and one shared linear-quadratic reaction law are
+used across the cohort. The stored metadata preserves `representation`,
+`laplacian_kind`, `rho`, `growth_rate`, `saturation_rate`, and `seed` exactly
+after validation.
+
+Observation-time arrays are caller supplied and subject-specific. The builder
+requires one valid one-dimensional NumPy time array per subject, copies those
+arrays before simulation and storage, and supports irregular schedules and
+different visit counts. The dataset is noise-free; configurations requesting
+observation noise are rejected with `SchemaError`.
+
+The returned dataclass is frozen by attribute, but NumPy array contents are not
+deeply immutable. Returned arrays are independently owned by the dataset and do
+not alias caller-provided time arrays. This assembly layer reuses existing
+connectome, graph, baseline, reaction, and cohort-simulation modules rather than
+duplicating their formulas.
+
+### Canonical PyTorch neural reaction-diffusion model
+
+Defined in `neural.py`
+
+```python
+class NeuralReactionDiffusion(nn.Module):
+    def __init__(
+        self,
+        *,
+        hidden_width: int = 16,
+        initial_rho: float = 0.1,
+    ) -> None:
+        ...
+
+    @property
+    def rho(self) -> torch.Tensor:
+        ...
+
+    def reaction(self, y: torch.Tensor) -> torch.Tensor:
+        ...
+
+    def forward(
+        self,
+        y: torch.Tensor,
+        laplacian: torch.Tensor,
+    ) -> torch.Tensor:
+        ...
+
+    def integrate(
+        self,
+        y0: torch.Tensor,
+        laplacian: torch.Tensor,
+        times: torch.Tensor,
+        *,
+        max_step=0.05,
+    ) -> torch.Tensor:
+        ...
+```
+
+`NeuralReactionDiffusion` is the canonical reusable neural model. `sr_model_1.py`
+is the historical architectural reference, and `sr_model_2.py` is not the
+canonical implementation.
+
+The neural reaction law is one shared scalar MLP applied independently to every
+ROI:
+
+```python
+Linear(1, hidden_width)
+Tanh()
+Linear(hidden_width, hidden_width)
+Tanh()
+Linear(hidden_width, 1)
+```
+
+
+Represents:
+
+```python
+dy_s_dt = -rho * L_s @ y_s + r_theta(y_s)
+```
+
+`raw_rho` is an unconstrained learned scalar parameter, while `rho` is exposed
+as `softplus(raw_rho)` and is therefore positive. `initial_rho` is validated as
+a finite positive scalar and converted through inverse-softplus so the physical
+initial value matches the requested coefficient.
+
+Supported state and Laplacian combinations are:
+
+```python
+y.shape == (R,)
+laplacian.shape == (R, R)
+output.shape == (R,)
+
+y.shape == (B, R)
+laplacian.shape == (R, R)
+output.shape == (B, R)
+
+y.shape == (B, R)
+laplacian.shape == (B, R, R)
+output.shape == (B, R)
+```
+
+Subject-specific Laplacians are supplied externally and fixed by the caller
+The model contains no global graph, no fallback chain graph, and no group-average
+network. Unsupported shape combinations, non-floating tensors, nonfinite values
+and device or dtype mismatches raise `SchemaError`. Inputs are not silently
+moved, cast, symmetrized, normalized, clipped, or projected to be nonnegative
+
+`integrate` uses differentiable classical RK4 implemented with PyTorch
+operations only. NumPy RK4 remains the ground-truth synthetic-data solver;
+PyTorch RK4 is required for later neural training because it preserves gradient
+flow to `raw_rho`, all reaction-network parameters, and `y0` when `y0` requires
+gradients. Gradients with respect to observation times are not a supported
+objective.
+
+For requested times:
+
+```python
+y0.shape == (R,)    -> trajectory.shape == (T, R)
+y0.shape == (B, R) -> trajectory.shape == (T, B, R)
+```
+
+The first trajectory row is a clone of `y0`, and internal RK4 substeps are not
+returned. `times` must be a one-dimensional finite floating tensor on the same
+device and with the same dtype as `y0`; values must be strictly increasing when
+more than one time is supplied. `max_step` is a finite positive scalar used as
+the maximum RK4 substep size.
