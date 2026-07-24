@@ -637,3 +637,163 @@ returned. `times` must be a one-dimensional finite floating tensor on the same
 device and with the same dtype as `y0`; values must be strictly increasing when
 more than one time is supplied. `max_step` is a finite positive scalar used as
 the maximum RK4 substep size.
+
+### Symbolic neural-reaction distillation
+
+Defined in `symbolic.py`
+
+```python
+@dataclass(frozen=True)
+class ReactionSamples:
+    input_values: np.ndarray              # shape: (N, 1)
+    neural_reaction_values: np.ndarray    # shape: (N,)
+    domain_min: float
+    domain_max: float
+
+@dataclass(frozen=True)
+class SymbolicRegressionConfig:
+    niterations: int = 100
+    populations: int = 15
+    population_size: int = 33
+    maxsize: int = 15
+    seed: int = 42
+    model_selection: str = "best"
+    output_directory: str | None = None
+```
+
+The fitting domain is derived from training-subject trajectories only:
+
+```python
+training_state_domain(dataset, split) -> tuple[float, float]
+```
+
+The split object must provide `train_indices`, or the caller may pass a direct
+sequence of training indices. Validation and test subjects do not determine the
+symbolic fitting domain.
+
+Neural reaction sampling uses:
+
+```python
+sample_neural_reaction(
+    model,
+    *,
+    domain_min,
+    domain_max,
+    n_samples=500,
+    device="cpu",
+    dtype=torch.float64,
+) -> ReactionSamples
+```
+
+Sampling evaluates only:
+
+```python
+model.reaction(y_samples)
+```
+
+It does not call graph diffusion, `forward`, trajectory integration, the
+ground-truth reaction function, or PySR. The model is temporarily put in eval
+mode and restored to its prior training/eval mode afterwards. The requested
+device and dtype must match the model parameters; inputs are not silently moved
+or cast to hide caller errors.
+
+PySR receives only:
+
+```python
+X = ReactionSamples.input_values
+y = ReactionSamples.neural_reaction_values
+```
+
+It does not receive graph data, trajectories, subject metadata, visit times,
+`rho_true`, `growth_rate`, `saturation_rate`, or true reaction values. Ground
+truth is evaluation-only.
+
+The operator set is fixed:
+
+```python
+binary_operators = ["+", "-", "*"]
+unary_operators = []
+model_selection = "best"
+```
+
+Division, exponentiation, logarithms, trigonometric functions, powers as
+separate operators, conditionals, and custom operators are not configurable in
+this interface. Numeric constants are allowed. PySR is imported lazily inside
+`fit_symbolic_reaction`, so importing `tau_sr.symbolic` does not start Julia or
+run a search.
+
+```python
+fit_symbolic_reaction(
+    samples: ReactionSamples,
+    config: SymbolicRegressionConfig,
+) -> SymbolicFitResult
+```
+
+The fit result stores the selected equation text, complexity, PySR training
+loss, exact operator metadata, seed, selected equation index when available,
+SymPy expression text when available, PySR version metadata, number of evaluated
+equations when available, and the PySR artifact directory. If no
+`output_directory` is supplied, a temporary directory named with the
+`tau_sr_pysr_` prefix is created. Generated PySR search artifacts are not source
+files and should not be committed.
+
+Evaluation happens only after symbolic fitting:
+
+```python
+evaluate_symbolic_recovery(
+    fit_result,
+    neural_model,
+    dataset,
+    evaluation_grid,
+    *,
+    device="cpu",
+    dtype=torch.float64,
+) -> SymbolicRecoveryMetrics
+```
+
+Use an independent evaluation grid over the same training-derived domain, for
+example:
+
+```python
+make_midpoint_evaluation_grid(domain_min, domain_max, n_points=1000)
+```
+
+The evaluation decomposition is:
+
+```python
+neural approximation error:      r_theta(y) versus r_true(y)
+symbolic distillation error:     r_symbolic(y) versus r_theta(y)
+end-to-end symbolic recovery:    r_symbolic(y) versus r_true(y)
+```
+
+Metrics include RMSE and MAE for all three comparisons. Normalized RMSE values
+are reported only when the true reaction range is not numerically negligible.
+
+Polynomial interpretation is optional and post-fit:
+
+```python
+interpret_symbolic_polynomial(
+    fit_result,
+    *,
+    true_growth_rate=None,
+    true_saturation_rate=None,
+) -> PolynomialInterpretation
+```
+
+When the selected expression can be interpreted as a polynomial in `y`, the
+helper extracts constant, linear, quadratic, and highest-degree information.
+For the controlled synthetic target `a*y - b*y**2`, the expected signs are:
+
+```python
+constant ~= 0
+linear ~= a
+quadratic ~= -b
+```
+
+Coefficient errors are calculated only when requested true coefficients are
+provided and extraction succeeds. The selected PySR equation is not rewritten,
+manually replaced, or chosen because it resembles the known target.
+
+This symbolic layer uses no patient data, does not train the neural model, does
+not evaluate trajectories, does not import legacy SR files, does not broaden the
+operator set, and does not run robustness or multi-seed experiments.
