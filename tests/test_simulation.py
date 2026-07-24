@@ -854,7 +854,7 @@ def test_cohort_invalid_reaction_output_reports_subject_index() -> None:
             return np.ones((1, 2))
         return np.zeros_like(state)
 
-    with pytest.raises(SchemaError, match="subject index 1.*reaction_fn output"):
+    with pytest.raises(SchemaError, match=r"subject index 1.*reaction_fn output"):
         simulate_reaction_diffusion_cohort(
             np.array([[1.0, 0.0], [10.0, 0.0]]),
             (np.array([0.0, 0.1]), np.array([0.0, 0.1])),
