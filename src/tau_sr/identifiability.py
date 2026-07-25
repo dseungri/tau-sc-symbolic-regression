@@ -209,7 +209,9 @@ class IdentifiabilityExperimentResult:
 def build_controlled_recovery_dataset() -> SyntheticRecoveryDataset:
     """Recreate the deterministic 24-subject noise-free recovery dataset."""
 
-    times_by_subject = tuple(np.array(CONTROLLED_TIMES, dtype=float) for _ in range(24))
+    times_by_subject = tuple(
+        np.array(CONTROLLED_TIMES, dtype=float) for _ in range(CONTROLLED_N_SUBJECTS)
+    )
     return build_noise_free_recovery_dataset(
         SyntheticCohortConfig(
             n_subjects=CONTROLLED_N_SUBJECTS,
