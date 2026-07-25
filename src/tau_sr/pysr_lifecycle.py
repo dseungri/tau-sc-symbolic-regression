@@ -174,7 +174,7 @@ def run_json_worker(
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
                 error = str(payload.get("error", "worker reported failure"))
-                raise PySRWorkerError(
+                raise PySrWorkerError(
                     error,
                     returncode=process.returncode,
                     stdout=stdout,
@@ -184,16 +184,29 @@ def run_json_worker(
 
             returncode = process.poll()
             if returncode is not None:
+                # The worker may have written its atomic result exactly as it
+                # exited; give the read one more chance before concluding failure.
+                worker_result = _read_worker_result(result)
+                if worker_result is not None:
+                    status, payload = worker_result
+                    if status == "ok":
+                        return _finish_completed_worker(
+                            process,
+                            payload,
+                            shutdown_grace_seconds=shutdown_grace,
+                            stdout_path=stdout_path,
+                            stderr_path=stderr_path,
+                        )
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
                 if result.exists():
-                    raise PySRWorkerError(
+                    raise PySrWorkerError(
                         "worker result is malformed or incomplete.",
                         returncode=returncode,
                         stdout=stdout,
                         stderr=stderr,
                     )
-                raise PySRWorkerError(
+                raise PySrWorkerError(
                     "worker failed before producing a result.",
                     returncode=returncode,
                     stdout=stdout,
@@ -204,7 +217,7 @@ def run_json_worker(
                 cleanup_required = _terminate_owned_worker(process, shutdown_grace)
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
-                raise PySRWorkerError(
+                raise PySrWorkerError(
                     "worker timed out before producing a result.",
                     returncode=process.returncode,
                     stdout=stdout,
