@@ -149,7 +149,7 @@ class NeuralRecoveryMetrics:
     estimated_rho: float
     true_rho: float
     rho_absolute_error: float
-    rho_relative_error: float
+    rho_relative_error: float | None
     reaction_curve_rmse: float
     reaction_curve_mae: float
 
@@ -164,13 +164,19 @@ class NeuralRecoveryMetrics:
             "estimated_rho",
             "true_rho",
             "rho_absolute_error",
-            "rho_relative_error",
             "reaction_curve_rmse",
             "reaction_curve_mae",
         ):
             value = _require_real_scalar(getattr(self, field_name), field_name)
             if value < 0.0:
                 raise SchemaError(f"{field_name} must be nonnegative.")
+        if self.rho_relative_error is not None:
+            rho_relative_error = _require_real_scalar(
+                self.rho_relative_error,
+                "rho_relative_error",
+                minimum=0.0,
+            )
+            object.__setattr__(self, "rho_relative_error", rho_relative_error)
         object.__setattr__(self, "subject_indices", subject_indices)
 
 
@@ -340,7 +346,7 @@ def evaluate_neural_recovery(
     torch_dtype = _validate_torch_dtype(dtype)
     _validate_model_device_dtype(model, device=torch_device, dtype=torch_dtype)
     grid = _validate_reaction_grid(reaction_grid)
-    true_rho = _require_real_scalar(dataset.rho, "dataset.rho", positive=True)
+    true_rho = _require_real_scalar(dataset.rho, "dataset.rho", minimum=0.0)
 
     was_training = model.training
     try:
@@ -407,7 +413,7 @@ def evaluate_neural_recovery(
     trajectory_rmse = math.sqrt(trajectory_mse)
     estimated_rho = float(model.rho.detach().cpu().item())
     rho_absolute_error = abs(estimated_rho - true_rho)
-    rho_relative_error = rho_absolute_error / true_rho
+    rho_relative_error = None if true_rho == 0.0 else rho_absolute_error / true_rho
     reaction_residual = learned_reaction_np - true_reaction_np
     reaction_curve_rmse = math.sqrt(float(np.mean(reaction_residual**2)))
     reaction_curve_mae = float(np.mean(np.abs(reaction_residual)))
