@@ -1,4 +1,4 @@
-"""Canonical PyTorch neural reaction-diffusion model."""
+"""Canonical PyTorch neural reaction-diffusion model"""
 
 from __future__ import annotations
 

@@ -659,6 +659,30 @@ def test_evaluate_neural_recovery_reports_rho_and_reaction_errors() -> None:
     assert metrics.reaction_curve_mae == pytest.approx(np.mean(np.abs(grid)))
 
 
+def test_evaluate_neural_recovery_skips_relative_rho_error_for_zero_true_rho() -> None:
+    dataset = _base_dataset(rho=0.0)
+    model = StoredTrajectoryModel(
+        dataset.trajectories[0],
+        rho=0.05,
+        growth_rate=dataset.growth_rate,
+        saturation_rate=dataset.saturation_rate,
+    ).double()
+
+    metrics = evaluate_neural_recovery(
+        model,
+        dataset,
+        (0,),
+        np.linspace(0.0, 1.0, 5),
+        max_step=0.05,
+        dtype=torch.float64,
+    )
+
+    assert metrics.true_rho == pytest.approx(0.0)
+    assert metrics.estimated_rho == pytest.approx(0.05)
+    assert metrics.rho_absolute_error == pytest.approx(0.05)
+    assert metrics.rho_relative_error is None
+
+
 @pytest.mark.parametrize(
     "grid",
     [
@@ -710,7 +734,7 @@ def test_evaluate_neural_recovery_rejects_nonfinite_predictions() -> None:
         )
 
 
-def test_evaluate_neural_recovery_rejects_invalid_subjects_and_zero_true_rho() -> None:
+def test_evaluate_neural_recovery_rejects_invalid_subjects_and_negative_true_rho() -> None:
     dataset = _base_dataset()
     model = StoredTrajectoryModel(
         dataset.trajectories[0],
@@ -731,7 +755,7 @@ def test_evaluate_neural_recovery_rejects_invalid_subjects_and_zero_true_rho() -
     with pytest.raises(SchemaError, match="dataset.rho"):
         evaluate_neural_recovery(
             model,
-            _base_dataset(rho=0.0),
+            _base_dataset(rho=-0.1),
             (0,),
             np.linspace(0.0, 1.0, 5),
             max_step=0.05,

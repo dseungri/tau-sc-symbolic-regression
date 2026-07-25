@@ -35,6 +35,8 @@ Let `R = expected_n_rois`.
 
 ### Public validation APIs
 
+Two functions everything else calls to check data before it gets used
+
 ```python
 validate_tau_table(table: pd.DataFrame, expected_n_rois: int = 148, require_complete_visits: bool = False) -> pd.DataFrame
 
@@ -53,10 +55,10 @@ build_connectome_representations(
 ) -> dict[str, np.ndarray]
 ```
 
-Let `R = expected_n_rois`. Each input and output matrix uses identical ROI ordering and
+Let `R = expected_n_rois`. Each input and output matrix uses same ROI ordering and
 shape `(R, R)`
 
-Return keys, in order:
+Return keys, in order
 
 ```python
 [
@@ -75,9 +77,8 @@ scaled_length = length / subject_median_positive_length
 W_length = count / (scaled_length + length_epsilon)
 ```
 
-`scaled_length` and `W_length` are calculated on count support only All representations
-preserve count support, are symmetric, and have zero diagonals, and length normalization is
-performed separately in each subject
+`scaled_length` and `W_length` are only calclated when there's actual count support All 3 representations keep the same count support, are symmetric, and have zero diagonals. Length normalization is
+done separately in each subject
 
 ### Graph laplacians
 
@@ -98,9 +99,9 @@ Accepted `kind` values:
 ```
 
 Let `R = expected_n_rois`. The weighted adjacency `W` has shape `(R, R)`, and the
-returned Laplacian `L` has shape `(R, R)`. `W` must be finite, nonnegative,
-symmetric, zero-diagonal, and every node must currently have finite, positive
-weighted degree. ROI ordering is unchanged
+returned Laplacian `L` has shape `(R, R)`. `W` has be finite, nonnegative,
+symmetric, zero-diagonal, and every node needs finite, positive
+weighted degree. ROI order doesn't change
 
 Formulas:
 
@@ -112,8 +113,7 @@ L_sym = I - D^(-1/2) W D^(-1/2)
 
 A separate Laplacian is constructed for each subject and network representation
 The transport term for a state vector `y` with shape `(R,)` is `-rho * (L @ y)`
-This function returns NumPy arrays and does not
-convert them to PyTorch tensors
+Returns NumPy arrays
 
 ### Synthetic baseline tau
 
@@ -127,13 +127,13 @@ generate_baseline_tau(
 ) -> np.ndarray
 ```
 
-Let `R = n_regions`. The output is a newly allocated one-dimensional floating NumPy
+Let `R = n_regions`. Output is a newly allocated ID float NumPy 
 array with shape `(R,)`. Each value is sampled independently from the half-open
-interval `[tau_min, tau_max)` using the caller-supplied `np.random.Generator`
+interval `[tau_min, tau_max)` using whatever caller-supplied `np.random.Generator`
 Independent generators initialized with the same seed reproduce the same output, and
 calls with the same generator advance that generator normally
 
-Validation requires `n_regions >= 2`, `rng` to be a NumPy generator, and finite
+Validation needs `n_regions >= 2`, `rng` to be a NumPy generator, and finite
 non-Boolean numeric bounds satisfying `0 <= tau_min < tau_max`. Invalid inputs raise
 `SchemaError` before random values are consumed
 
@@ -170,14 +170,14 @@ The right-hand side contract is:
 rhs(t: float, y: np.ndarray) -> np.ndarray
 ```
 
-State and derivative arrays must be one-dimensional real numeric NumPy arrays with
+State and derivative arrays have to be one-dimensional real numeric NumPy arrays with
 matching shape `(R,)`, nonempty and finite. `rk4_step` returns one newly allocated
 floating state vector with shape `(R,)`
 
-`integrate_rk4` requires `times` to be a one-dimensional, finite, strictly increasing
+`integrate_rk4` needs `times` to be a one-dimensional, finite, strictly increasing
 NumPy array. It returns a newly allocated floating trajectory with shape
 `(len(times), R)`, where the first row is a copy of `y0`. Forward integration only is
-supported. `max_step` is the maximum RK4 substep size, not a step count, and defaults
+supported. `max_step` is the max RK4 substep size, not a step count, and defaults
 to `0.05`
 
 For each requested interval, the solver uses:
@@ -215,24 +215,23 @@ reaction = reaction_fn(y)
 dy_dt = transport + reaction
 ```
 
-`laplacian` must be a finite, real numeric, square NumPy array with shape `(R, R)`
-`rho` must be finite, non-Boolean, and nonnegative `reaction_fn` must be callable
+`laplacian` has to be finite, real, square NumPy array with shape `(R, R)`
+`rho` has to be finite, non-Boolean, and nonnegative `reaction_fn` has to be callable
 and return a finite, real numeric NumPy vector with shape `(R,)` when passed a state
-vector with shape `(R,)`
+vector with shape `(R,)`.
 
-Dynamic states `y` must be finite, real numeric, one-dimensional NumPy arrays with
+Dynamic states `y` has to be finite, real numeric, one-dimensional NumPy arrays with
 shape `(R,)`. The output is a newly allocated floating NumPy array with shape `(R,)`
-The equation is autonomous, so `t` is validated for RK4 compatibility but is not used
-in the calculation
+The equation is autonomous, so `t` is validated for RK4 compatibility but not used in the math.
 
-The Laplacian and state must use the same ROI order:
+The Laplacian and state have to use the same ROI order:
 
 ```python
 y[i] <-> roi_labels[i] <-> row/column i of laplacian
 ```
 
-The factory stores an internal copy of the Laplacian
- The returned RHS passes a fresh copy of `y` to `reaction_fn`. Invalid factory inputs/invalid dynamic inputs/invalid reaction outputs/nonfinite computed
+The factory keeps an internal copy of the Laplacian
+ Whatever RHS it returns passes a fresh copy of `y` to `reaction_fn`. Invalid factory inputs/invalid dynamic inputs/invalid reaction outputs/nonfinite computed
 transport/derivatives raise `SchemaError`
 
 This helper is compatible with `rk4_step` and `integrate_rk4`. 
@@ -271,15 +270,14 @@ laplacian.shape == (R, R)
 ```
 
 The returned trajectory is a newly allocated floating NumPy array with shape
-`(T, R)`. Row `trajectory[0]` is a copy of `y0`, and rows are returned only for
-the exact requested observation times in `times`; internal RK4 substeps are not
-included. `times` may be irregularly spaced, may start from a nonzero or negative
-absolute time, and may contain a single valid time.
+`(T, R)`. Row `trajectory[0]` is a copy of `y0`, and rows come back only for
+the exact times you requested. `times` can be irregularly spaced, or start from a nonzero or negative
+absolute time, can contain a single valid time.
 
-`max_step` is forwarded unchanged to `integrate_rk4` as the maximum RK4 substep
-size. It is not a step count.
+`max_step` is passed straight to `integrate_rk4` as the max RK4 substep
+size. it'sn't a step count.
 
-ROI ordering is unchanged:
+ROI ordering is the same
 
 ```python
 trajectory[t_index, i] <-> y0[i] <-> roi_labels[i] <-> row/column i of laplacian
@@ -314,14 +312,14 @@ len(times_by_subject) == S
 times_by_subject[s].shape == (T_s,)
 ```
 
-The return value is an ordered tuple because subjects may have different numbers
+The return value is an ordered tuple because subjects might have different numbers
 of visits:
 
 ```python
 trajectories[s].shape == (T_s, R)
 ```
 
-Subject index `s` is positional and must refer to the same subject across
+Subject index `s` is positional and has to refer to the same subject across
 `baseline_states[s]`, `laplacians[s]`, `times_by_subject[s]`, and
 `trajectories[s]`. ROI index `i` is also positional:
 
@@ -333,20 +331,20 @@ baseline_states[s, i]
     <-> roi_labels[i]
 ```
 
-The function requires one Laplacian per subject and does not broadcast a single
+The function needs one Laplacian per subject and doesn't broadcast a single
 two-dimensional Laplacian or use a group-average network. `rho` and
 `reaction_fn` are shared across the cohort, while baseline states, Laplacians,
 and observation-time arrays are subject-specific.
 
-Each time array must follow the single-subject time contract: one-dimensional,
+Each time array has to follow the single-subject time contract: one-dimensional,
 nonempty, finite, real numeric, and strictly increasing when it has multiple
-entries. Subjects may have irregular visits, different baseline absolute times,
+entries. Subjects might have irregular visits, different baseline absolute times,
 and different numbers of visits. A two-dimensional NumPy `times_by_subject`
 array is accepted as a fixed-visit convenience, where each row is one subject's
 time array.
 
 The cohort simulator reuses `simulate_reaction_diffusion_trajectory` once per
-subject. It does not reimplement RK4 and does not reimplement the
+subject. It doesn't reimplement RK4 and doesn't reimplement the
 reaction-diffusion RHS. It validates cohort-level shapes and all time arrays
 before beginning simulation when the invalidity is knowable from outer inputs.
 If a lower-level per-subject simulation raises `SchemaError`, the cohort error
@@ -355,7 +353,7 @@ exception cause.
 
 The function is deterministic and noise-free, uses no random state, preserves
 caller-owned baseline, Laplacian, and time arrays, and returns newly allocated
-trajectory arrays. It does not generate baselines or connectomes, choose a
+trajectory arrays. It doesn't generate baselines or connectomes, choose a
 ground-truth reaction law, add observation noise, split subjects into training
 and test sets, or apply clipping, nonnegativity projection, or biological bounds.
 It can later accept validated arrays derived from real data.
@@ -398,14 +396,14 @@ The returned callable has the standard reaction contract:
 reaction_fn(y: np.ndarray) -> np.ndarray
 ```
 
-The state `y` must be a one-dimensional, nonempty, finite, real numeric NumPy
+The state `y` has to be a one-dimensional, nonempty, finite, real numeric NumPy
 array with shape `(R,)`. The output is a newly allocated floating NumPy array
-with the same shape `(R,)`. The callable does not mutate `y`, does not share
+with the same shape `(R,)`. The callable doesn't mutate `y`, doesn't share
 memory with `y`, uses no randomness, and validates that computed reaction values
 remain finite.
 
-Both coefficients are validated before construction. `growth_rate` must be
-finite, real numeric, non-Boolean, and strictly positive. `saturation_rate` must
+Both coefficients are validated before construction. `growth_rate` has to be
+finite, real numeric, non-Boolean, and strictly positive. `saturation_rate` has to
 be finite, real numeric, non-Boolean, and nonnegative. Invalid coefficients,
 invalid states, or nonfinite computed reaction values raise `SchemaError`.
 
@@ -420,7 +418,7 @@ operator set:
 ]
 ```
 
-This reaction law does not include diffusion, integrate trajectories, generate
+This reaction law doesn't include diffusion, integrate trajectories, generate
 baselines or connectomes, add observation noise, estimate parameters, run
 symbolic regression, or apply clipping or biological bounds. The coefficients
 are software-controlled synthetic parameters, not biological estimates or
@@ -490,7 +488,7 @@ synthetic_subject_0001
 ```
 
 ROI labels come from `generate_synthetic_roi_labels`. Subject index `s` and ROI
-index `i` are positional and must stay aligned:
+index `i` are positional and have to stay aligned:
 
 ```python
 baseline_states[s, i]
@@ -500,7 +498,7 @@ baseline_states[s, i]
     <-> roi_labels[i]
 ```
 
-The builder uses exactly one local `np.random.default_rng(config.seed)` and lets
+The builder uses one local `np.random.default_rng(config.seed)` and lets
 that generator advance through the existing tested helpers. Each subject gets an
 independently generated count connectome, aligned FA and length attributes, the
 explicitly requested adjacency representation, an independently constructed
@@ -515,16 +513,16 @@ dy_s_dt = -rho * (laplacians[s] @ y_s) + growth_rate * y_s - saturation_rate * y
 
 One shared nonnegative `rho` and one shared linear-quadratic reaction law are
 used across the cohort. The stored metadata preserves `representation`,
-`laplacian_kind`, `rho`, `growth_rate`, `saturation_rate`, and `seed` exactly
+`laplacian_kind`, `rho`, `growth_rate`, `saturation_rate`, and `seed`
 after validation.
 
 Observation-time arrays are caller supplied and subject-specific. The builder
-requires one valid one-dimensional NumPy time array per subject, copies those
+needs one valid one-dimensional NumPy time array per subject, copies those
 arrays before simulation and storage, and supports irregular schedules and
 different visit counts. The dataset is noise-free; configurations requesting
 observation noise are rejected with `SchemaError`.
 
-The returned dataclass is frozen by attribute, but NumPy array contents are not
+The returned dataclass is frozen by attribute, but NumPy array contents aren't
 deeply immutable. Returned arrays are independently owned by the dataset and do
 not alias caller-provided time arrays. This assembly layer reuses existing
 connectome, graph, baseline, reaction, and cohort-simulation modules rather than
@@ -570,7 +568,7 @@ class NeuralReactionDiffusion(nn.Module):
 ```
 
 `NeuralReactionDiffusion` is the canonical reusable neural model. `sr_model_1.py`
-is the historical architectural reference, and `sr_model_2.py` is not the
+is the historical architectural reference, and `sr_model_2.py` isn't the
 canonical implementation.
 
 The neural reaction law is one shared scalar MLP applied independently to every
@@ -615,14 +613,14 @@ output.shape == (B, R)
 Subject-specific Laplacians are supplied externally and fixed by the caller
 The model contains no global graph, no fallback chain graph, and no group-average
 network. Unsupported shape combinations, non-floating tensors, nonfinite values
-and device or dtype mismatches raise `SchemaError`. Inputs are not silently
-moved, cast, symmetrized, normalized, clipped, or projected to be nonnegative
+and device or dtype mismatches raise `SchemaError`. Inputs aren't moved, cast, 
+symmetrized, normalized, clipped, or projected to be nonnegative
 
 `integrate` uses differentiable classical RK4 implemented with PyTorch
 operations only. NumPy RK4 remains the ground-truth synthetic-data solver;
 PyTorch RK4 is required for later neural training because it preserves gradient
-flow to `raw_rho`, all reaction-network parameters, and `y0` when `y0` requires
-gradients. Gradients with respect to observation times are not a supported
+flow to `raw_rho`, all reaction-network parameters, and `y0` when `y0` needs
+gradients. Gradients with respect to observation times aren't a supported
 objective.
 
 For requested times:
@@ -632,11 +630,11 @@ y0.shape == (R,)    -> trajectory.shape == (T, R)
 y0.shape == (B, R) -> trajectory.shape == (T, B, R)
 ```
 
-The first trajectory row is a clone of `y0`, and internal RK4 substeps are not
-returned. `times` must be a one-dimensional finite floating tensor on the same
-device and with the same dtype as `y0`; values must be strictly increasing when
+The first trajectory row is a clone of `y0`, and internal RK4 substeps aren't
+returned. `times` has to be a one-dimensional finite floating tensor on the same
+device and with the same dtype as `y0`; values have to be strictly increasing when
 more than one time is supplied. `max_step` is a finite positive scalar used as
-the maximum RK4 substep size.
+the max RK4 substep size.
 
 ### Neural synthetic-recovery training
 
@@ -660,8 +658,8 @@ make_subject_split(
 
 Splits are subject-level only. Visits and ROIs from one subject are never split
 across partitions. The deterministic splitter uses `np.random.default_rng(seed)`,
-does not touch NumPy's legacy global RNG, returns nonempty train, validation, and
-test sets, and requires the three sets to be disjoint, complete, and in range.
+doesn't touch NumPy's legacy global RNG, returns nonempty train, validation, and
+test sets, and needs the three sets to be disjoint, complete, and in range.
 
 ```python
 @dataclass(frozen=True)
@@ -680,7 +678,7 @@ class NeuralTrainingConfig:
     device: str = "cpu"
 ```
 
-Configuration validation requires positive integer width, epoch, and patience
+Configuration validation needs positive integer width, epoch, and patience
 values; positive finite initial `rho`, learning rate, optional rho learning
 rate, and `max_step`; nonnegative finite weight decay and `min_delta`; a
 non-Boolean integer seed; a real floating PyTorch dtype; and an available
@@ -708,8 +706,8 @@ fit_noise_free_recovery_model(
 `fit_noise_free_recovery_model` constructs a fresh canonical
 `NeuralReactionDiffusion` from `config.hidden_width` and `config.initial_rho`
 when no model is supplied. Initialization is scoped with PyTorch RNG forking and
-`config.seed`, so fitting does not permanently change the caller's PyTorch RNG
-state. A supplied model must be compatible with the same forward, integrate, and
+`config.seed`, so fitting doesn't permanently change the caller's PyTorch RNG
+state. A supplied model has to be compatible with the same forward, integrate, and
 reaction interfaces. The model is moved explicitly to the configured device and
 dtype.
 
@@ -731,8 +729,8 @@ trajectories[s]     -> target
 ```
 
 Adjacency matrices, subject IDs, ROI labels, true `rho`, `growth_rate`, and
-`saturation_rate` are not learned inputs and are not part of the optimization
-loss. The two real pilot subjects are not used by this interface.
+`saturation_rate` aren't learned inputs and aren't part of the optimization
+loss. The two real pilot subjects aren't used by this interface.
 
 The trajectory loss excludes the baseline row because that row is supplied as
 the initial condition:
@@ -743,8 +741,8 @@ training_loss = mean(subject_loss over training subjects)
 ```
 
 This subject-balanced aggregation prevents subjects with more visits from
-automatically dominating training. Train and validation subjects must have at
-least two visits. Test-subject trajectories are not used for optimization,
+automatically dominating training. Train and validation subjects have to have at
+least two visits. Test-subject trajectories aren't used for optimization,
 validation, early stopping, hyperparameter selection, or model-state selection.
 
 Each epoch uses Adam, verifies finite training loss, finite gradients, finite
@@ -764,7 +762,7 @@ class NeuralRecoveryMetrics:
     estimated_rho: float
     true_rho: float
     rho_absolute_error: float
-    rho_relative_error: float
+    rho_relative_error: float | None
     reaction_curve_rmse: float
     reaction_curve_mae: float
 
@@ -786,13 +784,14 @@ over the requested subject indices and also exclude baseline rows. The true
 synthetic parameters are used only after fitting to calculate recovery metrics:
 `estimated_rho = model.rho`, `true_rho = dataset.rho`, absolute rho error,
 relative rho error for positive true `rho`, and neural reaction-curve RMSE/MAE
-against the known linear-quadratic law.
+against the known linear-quadratic law. When `true_rho == 0`, relative rho error
+is undefined and reported as `None`; absolute rho error remains available.
 
 The caller supplies `reaction_grid`. For strict recovery reporting, derive that
 grid from training-subject state values only, then reuse it unchanged for train,
-validation, and test metrics. The grid must be one-dimensional, nonempty, real
-floating, finite, and strictly increasing, and it is converted freshly to the
-model's requested dtype and device. Symbolic regression is not run in this phase,
+validation, and test metrics. The grid has to be one-dimensional, nonempty, real
+floating, finite, and strictly increasing, and it's converted freshly to the
+model's requested dtype and device. Symbolic regression isn't run in this phase,
 and neither `sr_model_1.py` nor `sr_model_2.py` is imported by the training
 workflow.
 
@@ -856,8 +855,8 @@ The fitting domain is derived from training-subject trajectories only:
 training_state_domain(dataset, split) -> tuple[float, float]
 ```
 
-The split object must provide `train_indices`, or the caller may pass a direct
-sequence of training indices. Validation and test subjects do not determine the
+The split object has to provide `train_indices`, or the caller might pass a direct
+sequence of training indices. Validation and test subjects don't determine the
 symbolic fitting domain.
 
 Neural reaction sampling uses:
@@ -880,10 +879,10 @@ Sampling evaluates only:
 model.reaction(y_samples)
 ```
 
-It does not call graph diffusion, `forward`, trajectory integration, the
+It doesn't call graph diffusion, `forward`, trajectory integration, the
 ground-truth reaction function, or PySR. The model is temporarily put in eval
 mode and restored to its prior training/eval mode afterwards. The requested
-device and dtype must match the model parameters; inputs are not silently moved
+device and dtype have to match the model parameters; inputs aren't moved
 or cast to hide caller errors.
 
 PySR receives only:
@@ -893,7 +892,7 @@ X = ReactionSamples.input_values
 y = ReactionSamples.neural_reaction_values
 ```
 
-It does not receive graph data, trajectories, subject metadata, visit times,
+It doesn't receive graph data, trajectories, subject metadata, visit times,
 `rho_true`, `growth_rate`, `saturation_rate`, or true reaction values. Ground
 truth is evaluation-only.
 
@@ -906,9 +905,9 @@ model_selection = "best"
 ```
 
 Division, exponentiation, logarithms, trigonometric functions, powers as
-separate operators, conditionals, and custom operators are not configurable in
+separate operators, conditionals, and custom operators aren't configurable in
 this interface. Numeric constants are allowed. PySR is imported lazily inside
-`fit_symbolic_reaction`, so importing `tau_sr.symbolic` does not start Julia or
+`fit_symbolic_reaction`, so importing `tau_sr.symbolic` doesn't start Julia or
 run a search.
 
 ```python
@@ -923,8 +922,8 @@ loss, exact operator metadata, seed, selected equation index when available,
 SymPy expression text when available, PySR version metadata, number of evaluated
 equations when available, and the PySR artifact directory. If no
 `output_directory` is supplied, a temporary directory named with the
-`tau_sr_pysr_` prefix is created. Generated PySR search artifacts are not source
-files and should not be committed.
+`tau_sr_pysr_` prefix is created. Generated PySR search artifacts aren't source
+files and shouldn't be committed.
 
 Evaluation happens only after symbolic fitting:
 
@@ -956,7 +955,7 @@ end-to-end symbolic recovery:    r_symbolic(y) versus r_true(y)
 ```
 
 Metrics include RMSE and MAE for all three comparisons. Normalized RMSE values
-are reported only when the true reaction range is not numerically negligible.
+are reported only when the true reaction range isn't numerically negligible.
 
 Polynomial interpretation is optional and post-fit:
 
@@ -970,8 +969,8 @@ interpret_symbolic_polynomial(
 ```
 
 When the selected expression can be interpreted as a polynomial in `y`, the
-helper extracts constant, linear, quadratic, and highest-degree information.
-For the controlled synthetic target `a*y - b*y**2`, the expected signs are:
+helper extracts constant, linear, quadratic, and highest-degree information,
+For the controlled synthetic target `a*y - b*y**2`, the expected signs are
 
 ```python
 constant ~= 0
@@ -980,9 +979,4 @@ quadratic ~= -b
 ```
 
 Coefficient errors are calculated only when requested true coefficients are
-provided and extraction succeeds. The selected PySR equation is not rewritten,
-manually replaced, or chosen because it resembles the known target.
-
-This symbolic layer uses no patient data, does not train the neural model, does
-not evaluate trajectories, does not import legacy SR files, does not broaden the
-operator set, and does not run robustness or multi-seed experiments.
+there and extraction succeeds
