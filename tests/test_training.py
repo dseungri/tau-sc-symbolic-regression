@@ -301,6 +301,7 @@ def test_neural_training_config_default_constructs_successfully() -> None:
     assert config.hidden_width == 16
     assert config.dtype is torch.float64
     assert config.device == "cpu"
+    assert config.rho_learning_rate is None
 
 
 @pytest.mark.parametrize(
@@ -312,6 +313,11 @@ def test_neural_training_config_default_constructs_successfully() -> None:
         {"initial_rho": math.inf},
         {"learning_rate": 0.0},
         {"learning_rate": math.nan},
+        {"rho_learning_rate": 0.0},
+        {"rho_learning_rate": -1e-3},
+        {"rho_learning_rate": math.inf},
+        {"rho_learning_rate": math.nan},
+        {"rho_learning_rate": True},
         {"weight_decay": -1e-3},
         {"max_epochs": 0},
         {"max_epochs": 1.2},

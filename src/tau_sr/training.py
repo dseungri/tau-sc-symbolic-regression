@@ -61,6 +61,7 @@ class NeuralTrainingConfig:
     hidden_width: int = 16
     initial_rho: float = 0.05
     learning_rate: float = 1e-3
+    rho_learning_rate: float | None = None
     weight_decay: float = 0.0
     max_epochs: int = 500
     patience: int = 50
@@ -81,6 +82,15 @@ class NeuralTrainingConfig:
             "learning_rate",
             positive=True,
         )
+        rho_learning_rate = (
+            None
+            if self.rho_learning_rate is None
+            else _require_real_scalar(
+                self.rho_learning_rate,
+                "rho_learning_rate",
+                positive=True,
+            )
+        )
         weight_decay = _require_real_scalar(
             self.weight_decay,
             "weight_decay",
@@ -93,6 +103,7 @@ class NeuralTrainingConfig:
 
         object.__setattr__(self, "initial_rho", initial_rho)
         object.__setattr__(self, "learning_rate", learning_rate)
+        object.__setattr__(self, "rho_learning_rate", rho_learning_rate)
         object.__setattr__(self, "weight_decay", weight_decay)
         object.__setattr__(self, "min_delta", min_delta)
         object.__setattr__(self, "max_step", max_step)
@@ -214,6 +225,8 @@ def fit_noise_free_recovery_model(
     dataset: SyntheticRecoveryDataset,
     split: SubjectSplit,
     config: NeuralTrainingConfig,
+    *,
+    model: NeuralReactionDiffusion | None = None,
 ) -> NeuralTrainingResult:
     """Fit a new neural reaction-diffusion model using train and validation subjects only."""
 
@@ -226,12 +239,12 @@ def fit_noise_free_recovery_model(
     _validate_fit_subjects(dataset, checked_split.train_indices)
     _validate_fit_subjects(dataset, checked_split.validation_indices)
 
-    model = _new_model(checked_config, device=device, dtype=dtype)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=checked_config.learning_rate,
-        weight_decay=checked_config.weight_decay,
+    fit_model = (
+        _new_model(checked_config, device=device, dtype=dtype)
+        if model is None
+        else _prepare_supplied_model(model, device=device, dtype=dtype)
     )
+    optimizer = _make_optimizer(fit_model, checked_config)
 
     best_state: dict[str, torch.Tensor] | None = None
     best_validation_loss = math.inf
@@ -241,10 +254,10 @@ def fit_noise_free_recovery_model(
     validation_losses: list[float] = []
 
     for epoch in range(checked_config.max_epochs):
-        model.train()
+        fit_model.train()
         optimizer.zero_grad()
         training_loss = _split_trajectory_loss(
-            model,
+            fit_model,
             dataset,
             checked_split.train_indices,
             max_step=checked_config.max_step,
@@ -253,14 +266,14 @@ def fit_noise_free_recovery_model(
         )
         _validate_finite_tensor(training_loss, "training loss")
         training_loss.backward()
-        _validate_finite_gradients(model)
+        _validate_finite_gradients(fit_model)
         optimizer.step()
-        _validate_finite_parameters(model)
+        _validate_finite_parameters(fit_model)
 
-        model.eval()
+        fit_model.eval()
         with torch.no_grad():
             validation_loss = _split_trajectory_loss(
-                model,
+                fit_model,
                 dataset,
                 checked_split.validation_indices,
                 max_step=checked_config.max_step,
@@ -277,7 +290,7 @@ def fit_noise_free_recovery_model(
         if validation_loss_value < best_validation_loss - checked_config.min_delta:
             best_validation_loss = validation_loss_value
             best_epoch = epoch
-            best_state = _clone_state_dict(model)
+            best_state = _clone_state_dict(fit_model)
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
@@ -287,11 +300,11 @@ def fit_noise_free_recovery_model(
     if best_state is None:
         raise SchemaError("training did not produce a finite validation state.")
 
-    model.load_state_dict(best_state)
-    model.eval()
+    fit_model.load_state_dict(best_state)
+    fit_model.eval()
 
     return NeuralTrainingResult(
-        model=model,
+        model=fit_model,
         split=checked_split,
         training_losses=tuple(training_losses),
         validation_losses=tuple(validation_losses),
@@ -439,6 +452,76 @@ def _new_model(
     return model.to(device=device, dtype=dtype)
 
 
+def _prepare_supplied_model(
+    model: object,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> NeuralReactionDiffusion:
+    if not isinstance(model, NeuralReactionDiffusion):
+        raise SchemaError("model must be a NeuralReactionDiffusion.")
+    model = model.to(device=device, dtype=dtype)
+    _validate_model_device_dtype(model, device=device, dtype=dtype)
+    return model
+
+
+def _make_optimizer(
+    model: NeuralReactionDiffusion,
+    config: NeuralTrainingConfig,
+) -> torch.optim.Optimizer:
+    if config.rho_learning_rate is None:
+        parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+        if not parameters:
+            raise SchemaError("model must expose at least one trainable parameter.")
+        return torch.optim.Adam(
+            parameters,
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+        )
+
+    parameter_groups = _optimizer_parameter_groups(model, config)
+    if not parameter_groups:
+        raise SchemaError("model must expose at least one trainable parameter.")
+    return torch.optim.Adam(parameter_groups, weight_decay=config.weight_decay)
+
+
+def _optimizer_parameter_groups(
+    model: NeuralReactionDiffusion,
+    config: NeuralTrainingConfig,
+) -> list[dict[str, object]]:
+    if config.rho_learning_rate is None:
+        raise SchemaError("rho_learning_rate is required for grouped optimizer parameters.")
+
+    reaction_parameters: list[torch.nn.Parameter] = []
+    rho_parameters: list[torch.nn.Parameter] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if name == "raw_rho" or name.endswith(".raw_rho"):
+            rho_parameters.append(parameter)
+        else:
+            reaction_parameters.append(parameter)
+
+    parameter_groups: list[dict[str, object]] = []
+    if reaction_parameters:
+        parameter_groups.append(
+            {
+                "params": reaction_parameters,
+                "lr": config.learning_rate,
+                "name": "reaction",
+            }
+        )
+    if rho_parameters:
+        parameter_groups.append(
+            {
+                "params": rho_parameters,
+                "lr": config.rho_learning_rate,
+                "name": "rho",
+            }
+        )
+    return parameter_groups
+
+
 def _split_trajectory_loss(
     model: NeuralReactionDiffusion,
     dataset: SyntheticRecoveryDataset,
@@ -449,49 +532,92 @@ def _split_trajectory_loss(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     subject_losses = [
-        _subject_trajectory_loss(
+        _loss
+        for subject_group in _subject_groups_by_time(dataset, subject_indices)
+        for _loss in _subject_group_trajectory_losses(
             model,
             dataset,
-            subject_index,
+            subject_group,
             max_step=max_step,
             device=device,
             dtype=dtype,
         )
-        for subject_index in subject_indices
     ]
     if not subject_losses:
         raise SchemaError("subject_indices must be nonempty.")
     return torch.stack(subject_losses).mean()
 
 
-def _subject_trajectory_loss(
+def _subject_group_trajectory_losses(
     model: NeuralReactionDiffusion,
     dataset: SyntheticRecoveryDataset,
-    subject_index: int,
+    subject_indices: Sequence[int],
     *,
     max_step: float,
     device: torch.device,
     dtype: torch.dtype,
-) -> torch.Tensor:
-    subject = _subject_tensors(
-        dataset,
-        subject_index,
-        device=device,
-        dtype=dtype,
-        require_two_visits=True,
+) -> tuple[torch.Tensor, ...]:
+    subjects = tuple(
+        _subject_tensors(
+            dataset,
+            subject_index,
+            device=device,
+            dtype=dtype,
+            require_two_visits=True,
+        )
+        for subject_index in subject_indices
     )
+    if not subjects:
+        raise SchemaError("subject_indices must be nonempty.")
+    if len(subjects) == 1:
+        subject = subjects[0]
+        prediction = model.integrate(
+            subject.y0,
+            subject.laplacian,
+            subject.times,
+            max_step=max_step,
+        )
+        _validate_prediction_tensor(
+            prediction,
+            f"prediction for subject index {subject_indices[0]}",
+            expected_shape=subject.target.shape,
+        )
+        return (torch.mean((prediction[1:] - subject.target[1:]) ** 2),)
+
+    y0 = torch.stack([subject.y0 for subject in subjects], dim=0)
+    laplacian = torch.stack([subject.laplacian for subject in subjects], dim=0)
+    times = subjects[0].times
+    target = torch.stack([subject.target for subject in subjects], dim=1)
     prediction = model.integrate(
-        subject.y0,
-        subject.laplacian,
-        subject.times,
+        y0,
+        laplacian,
+        times,
         max_step=max_step,
     )
     _validate_prediction_tensor(
         prediction,
-        f"prediction for subject index {subject_index}",
-        expected_shape=subject.target.shape,
+        f"prediction for subject indices {tuple(subject_indices)}",
+        expected_shape=target.shape,
     )
-    return torch.mean((prediction[1:] - subject.target[1:]) ** 2)
+    residual = prediction[1:] - target[1:]
+    subject_losses = torch.mean(residual**2, dim=(0, 2))
+    return tuple(subject_losses.unbind(dim=0))
+
+
+def _subject_groups_by_time(
+    dataset: SyntheticRecoveryDataset,
+    subject_indices: Sequence[int],
+) -> tuple[tuple[int, ...], ...]:
+    groups: dict[tuple[float, ...], list[int]] = {}
+    for subject_index in subject_indices:
+        if subject_index < 0 or subject_index >= _dataset_subject_count(dataset):
+            raise SchemaError(f"subject index {subject_index} is outside the dataset range.")
+        times = _numpy_vector(
+            dataset.times_by_subject[subject_index],
+            f"times_by_subject[{subject_index}]",
+        )
+        groups.setdefault(tuple(float(value) for value in times), []).append(subject_index)
+    return tuple(tuple(group) for group in groups.values())
 
 
 def _subject_tensors(
@@ -615,6 +741,7 @@ def _validate_training_config(config: NeuralTrainingConfig) -> NeuralTrainingCon
         hidden_width=config.hidden_width,
         initial_rho=config.initial_rho,
         learning_rate=config.learning_rate,
+        rho_learning_rate=config.rho_learning_rate,
         weight_decay=config.weight_decay,
         max_epochs=config.max_epochs,
         patience=config.patience,
@@ -721,6 +848,8 @@ def _validate_finite_gradients(model: NeuralReactionDiffusion) -> None:
 def _validate_finite_parameters(model: NeuralReactionDiffusion) -> None:
     for name, parameter in model.named_parameters():
         _validate_finite_tensor(parameter.detach(), f"model parameter {name}")
+    for name, buffer in model.named_buffers():
+        _validate_finite_tensor(buffer.detach(), f"model buffer {name}")
 
 
 def _validate_model_device_dtype(
@@ -729,7 +858,11 @@ def _validate_model_device_dtype(
     device: torch.device,
     dtype: torch.dtype,
 ) -> None:
-    reference = next(model.parameters())
+    reference = next(model.parameters(), None)
+    if reference is None:
+        reference = next(model.buffers(), None)
+    if reference is None:
+        raise SchemaError("model must expose at least one tensor parameter or buffer.")
     if reference.device != device:
         raise SchemaError("model parameters must be on the requested device.")
     if reference.dtype != dtype:

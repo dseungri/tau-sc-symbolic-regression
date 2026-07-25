@@ -669,6 +669,7 @@ class NeuralTrainingConfig:
     hidden_width: int = 16
     initial_rho: float = 0.05
     learning_rate: float = 1e-3
+    rho_learning_rate: float | None = None
     weight_decay: float = 0.0
     max_epochs: int = 500
     patience: int = 50
@@ -680,10 +681,10 @@ class NeuralTrainingConfig:
 ```
 
 Configuration validation requires positive integer width, epoch, and patience
-values; positive finite initial `rho`, learning rate, and `max_step`;
-nonnegative finite weight decay and `min_delta`; a non-Boolean integer seed; a
-real floating PyTorch dtype; and an available requested device. There is no
-silent fallback from unavailable accelerators.
+values; positive finite initial `rho`, learning rate, optional rho learning
+rate, and `max_step`; nonnegative finite weight decay and `min_delta`; a
+non-Boolean integer seed; a real floating PyTorch dtype; and an available
+requested device. There is no silent fallback from unavailable accelerators.
 
 ```python
 @dataclass(frozen=True)
@@ -699,14 +700,25 @@ fit_noise_free_recovery_model(
     dataset: SyntheticRecoveryDataset,
     split: SubjectSplit,
     config: NeuralTrainingConfig,
+    *,
+    model: NeuralReactionDiffusion | None = None,
 ) -> NeuralTrainingResult
 ```
 
 `fit_noise_free_recovery_model` constructs a fresh canonical
-`NeuralReactionDiffusion` from `config.hidden_width` and `config.initial_rho`.
-Initialization is scoped with PyTorch RNG forking and `config.seed`, so fitting
-does not permanently change the caller's PyTorch RNG state. The model is moved
-explicitly to the configured device and dtype.
+`NeuralReactionDiffusion` from `config.hidden_width` and `config.initial_rho`
+when no model is supplied. Initialization is scoped with PyTorch RNG forking and
+`config.seed`, so fitting does not permanently change the caller's PyTorch RNG
+state. A supplied model must be compatible with the same forward, integrate, and
+reaction interfaces. The model is moved explicitly to the configured device and
+dtype.
+
+When `rho_learning_rate` is omitted, Adam uses the existing single optimizer
+parameter group with `learning_rate` for all trainable parameters. When
+`rho_learning_rate` is provided, trainable reaction parameters use
+`learning_rate` and the trainable `raw_rho` parameter uses `rho_learning_rate`.
+Fixed-rho diagnostic models that expose `raw_rho` as a buffer simply omit the
+rho optimizer group.
 
 Training uses only synthetic trajectories from `SyntheticRecoveryDataset`.
 For each train or validation subject, the tensors supplied to the model are:
@@ -783,6 +795,37 @@ floating, finite, and strictly increasing, and it is converted freshly to the
 model's requested dtype and device. Symbolic regression is not run in this phase,
 and neither `sr_model_1.py` nor `sr_model_2.py` is imported by the training
 workflow.
+
+### Neural identifiability diagnostics
+
+Defined in `identifiability.py`
+
+```python
+class ZeroAnchoredNeuralReactionDiffusion(NeuralReactionDiffusion)
+class FixedRhoZeroAnchoredReactionDiffusion(ZeroAnchoredNeuralReactionDiffusion)
+class OracleReactionDiffusion(NeuralReactionDiffusion)
+```
+
+These models are controlled synthetic diagnostics, not real-data fitting
+defaults. `ZeroAnchoredNeuralReactionDiffusion` parameterizes the scalar
+reaction as `r_theta(y) = y * g_theta(y)`, so `r_theta(0) == 0`.
+`FixedRhoZeroAnchoredReactionDiffusion` fixes rho to a known synthetic value
+while training the zero-anchored reaction. `OracleReactionDiffusion` fixes the
+known synthetic reaction law and trains only rho.
+
+```python
+build_controlled_recovery_dataset() -> SyntheticRecoveryDataset
+controlled_subject_split() -> SubjectSplit
+controlled_reaction_grid(dataset, split, *, n_points=200) -> np.ndarray
+fit_identifiability_model(dataset, split, config, model) -> tuple[NeuralTrainingResult, float]
+summarize_identifiability_result(...) -> IdentifiabilityExperimentResult
+```
+
+The controlled dataset and split recreate the 24-subject noise-free recovery
+setup used for mechanistic checks. Reaction grids are derived from training
+trajectories only. The runnable experiment entry point is
+`scripts/run_identifiability_experiment.py`, and the first controlled result is
+summarized in `docs/identifiability_experiment.md`.
 
 ### Symbolic neural-reaction distillation
 
