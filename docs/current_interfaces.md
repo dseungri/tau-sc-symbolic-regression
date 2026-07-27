@@ -371,14 +371,14 @@ class LongitudinalTrajectoryDataset:
     laplacians: np.ndarray
     times_by_subject: tuple[np.ndarray, ...]
     trajectories: tuple[np.ndarray, ...]
-    atlas: str = "Destrieux cortical plus 12 subcortical regions"
-    roi_alignment: str = "verified_direct_index"
-    tau_measurement: str = "SUVR"
-    tau_reference: str = "pending_exact_confirmation"
-    sc_weight_type: str = "normalized_fiber_count"
-    sc_static_over_time: bool = True
-    laplacian_kind: str = "symmetric_normalized"
-    data_alignment_ready: bool = True
+    atlas: str = "unknown"
+    roi_alignment: str = "unknown"
+    tau_measurement: str = "unknown"
+    tau_reference: str = "unknown"
+    sc_weight_type: str = "unknown"
+    sc_static_over_time: bool = False
+    laplacian_kind: str = "unknown"
+    data_alignment_ready: bool = False
     formal_evaluation_ready: bool = False
 
     @property
@@ -391,7 +391,9 @@ It contains neutral subject labels only, no source identifiers, no scan IDs, no
 exact dates, no demographics, no raw paths, and no synthetic truth fields such as
 true rho or reaction coefficients. Arrays are copied and stored read-only.
 `baseline_states` is derived from the first trajectory row instead of stored as
-duplicated input.
+duplicated input. Direct construction uses conservative `"unknown"` provenance
+and readiness defaults; loaders with verified provenance, such as
+`load_pilot_dataset`, must supply explicit metadata.
 
 ```python
 load_pilot_dataset(

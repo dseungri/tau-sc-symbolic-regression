@@ -21,6 +21,7 @@ from tau_sr.pilot_adapter import (
     PILOT_SUBCORTICAL_START,
     ROI_ALIGNMENT_DIRECT,
     ROI_LABELS_INVALID,
+    UNKNOWN_PROVENANCE,
     LongitudinalTrajectoryDataset,
     inspect_pilot_inputs,
     load_pilot_dataset,
@@ -340,6 +341,55 @@ def test_adapter_reuses_existing_laplacian_builder(tmp_path: Path, monkeypatch) 
         ((PILOT_N_REGIONS, PILOT_N_REGIONS), "symmetric_normalized"),
     ]
     np.testing.assert_array_equal(dataset.laplacians[0], np.eye(PILOT_N_REGIONS))
+
+
+def test_generic_dataset_defaults_to_unknown_unready_provenance() -> None:
+    synthetic = _small_synthetic_dataset()
+
+    generic = LongitudinalTrajectoryDataset(
+        subject_ids=synthetic.subject_ids,
+        roi_labels=synthetic.roi_labels,
+        adjacencies=synthetic.adjacencies,
+        laplacians=synthetic.laplacians,
+        times_by_subject=synthetic.times_by_subject,
+        trajectories=synthetic.trajectories,
+    )
+
+    assert generic.atlas == UNKNOWN_PROVENANCE
+    assert generic.roi_alignment == UNKNOWN_PROVENANCE
+    assert generic.tau_measurement == UNKNOWN_PROVENANCE
+    assert generic.tau_reference == UNKNOWN_PROVENANCE
+    assert generic.sc_weight_type == UNKNOWN_PROVENANCE
+    assert generic.sc_static_over_time is False
+    assert generic.laplacian_kind == UNKNOWN_PROVENANCE
+    assert generic.data_alignment_ready is False
+    assert generic.formal_evaluation_ready is False
+
+
+def test_ready_dataset_requires_explicit_provenance() -> None:
+    synthetic = _small_synthetic_dataset()
+
+    with pytest.raises(SchemaError, match="explicit provenance"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            data_alignment_ready=True,
+        )
+
+    with pytest.raises(SchemaError, match="data_alignment_ready"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            formal_evaluation_ready=True,
+        )
 
 
 def test_synthetic_and_generic_training_paths_are_equivalent() -> None:

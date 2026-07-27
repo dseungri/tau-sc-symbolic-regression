@@ -34,6 +34,16 @@ SC_WEIGHT_TYPE = "normalized_fiber_count"
 SC_STATIC_OVER_TIME = True
 DATA_ALIGNMENT_READY = True
 FORMAL_EVALUATION_READY = False
+UNKNOWN_PROVENANCE = "unknown"
+DEFAULT_DATASET_ATLAS = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_ROI_ALIGNMENT = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_TAU_MEASUREMENT = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_TAU_REFERENCE = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_SC_WEIGHT_TYPE = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_SC_STATIC_OVER_TIME = False
+DEFAULT_DATASET_LAPLACIAN_KIND = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_DATA_ALIGNMENT_READY = False
+DEFAULT_DATASET_FORMAL_EVALUATION_READY = False
 DEFAULT_LAPLACIAN_KIND: LaplacianKind = "symmetric_normalized"
 ROI_LABELS_INVALID = "roi_labels must contain exactly 160 unique nonempty labels."
 
@@ -48,6 +58,15 @@ _XLSX_NS = {
 
 __all__ = (
     "DEFAULT_LAPLACIAN_KIND",
+    "DEFAULT_DATASET_ATLAS",
+    "DEFAULT_DATASET_DATA_ALIGNMENT_READY",
+    "DEFAULT_DATASET_FORMAL_EVALUATION_READY",
+    "DEFAULT_DATASET_LAPLACIAN_KIND",
+    "DEFAULT_DATASET_ROI_ALIGNMENT",
+    "DEFAULT_DATASET_SC_STATIC_OVER_TIME",
+    "DEFAULT_DATASET_SC_WEIGHT_TYPE",
+    "DEFAULT_DATASET_TAU_MEASUREMENT",
+    "DEFAULT_DATASET_TAU_REFERENCE",
     "DATA_ALIGNMENT_READY",
     "FORMAL_EVALUATION_READY",
     "PILOT_ATLAS",
@@ -62,6 +81,7 @@ __all__ = (
     "SC_WEIGHT_TYPE",
     "TAU_MEASUREMENT",
     "TAU_REFERENCE_PENDING",
+    "UNKNOWN_PROVENANCE",
     "LongitudinalTrajectoryDataset",
     "inspect_pilot_inputs",
     "load_pilot_dataset",
@@ -79,15 +99,15 @@ class LongitudinalTrajectoryDataset:
     laplacians: np.ndarray
     times_by_subject: tuple[np.ndarray, ...]
     trajectories: tuple[np.ndarray, ...]
-    atlas: str = PILOT_ATLAS
-    roi_alignment: str = ROI_ALIGNMENT_DIRECT
-    tau_measurement: str = TAU_MEASUREMENT
-    tau_reference: str = TAU_REFERENCE_PENDING
-    sc_weight_type: str = SC_WEIGHT_TYPE
-    sc_static_over_time: bool = SC_STATIC_OVER_TIME
-    laplacian_kind: str = DEFAULT_LAPLACIAN_KIND
-    data_alignment_ready: bool = DATA_ALIGNMENT_READY
-    formal_evaluation_ready: bool = FORMAL_EVALUATION_READY
+    atlas: str = DEFAULT_DATASET_ATLAS
+    roi_alignment: str = DEFAULT_DATASET_ROI_ALIGNMENT
+    tau_measurement: str = DEFAULT_DATASET_TAU_MEASUREMENT
+    tau_reference: str = DEFAULT_DATASET_TAU_REFERENCE
+    sc_weight_type: str = DEFAULT_DATASET_SC_WEIGHT_TYPE
+    sc_static_over_time: bool = DEFAULT_DATASET_SC_STATIC_OVER_TIME
+    laplacian_kind: str = DEFAULT_DATASET_LAPLACIAN_KIND
+    data_alignment_ready: bool = DEFAULT_DATASET_DATA_ALIGNMENT_READY
+    formal_evaluation_ready: bool = DEFAULT_DATASET_FORMAL_EVALUATION_READY
 
     def __post_init__(self) -> None:
         subject_ids = _string_tuple(self.subject_ids, "subject_ids")
@@ -146,6 +166,7 @@ class LongitudinalTrajectoryDataset:
             "formal_evaluation_ready",
             _require_bool(self.formal_evaluation_ready, "formal_evaluation_ready"),
         )
+        _validate_provenance_readiness(self)
 
     @property
     def baseline_states(self) -> np.ndarray:
@@ -629,3 +650,20 @@ def _require_bool(value: object, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise SchemaError(f"{field_name} must be a boolean.")
     return value
+
+
+def _validate_provenance_readiness(dataset: LongitudinalTrajectoryDataset) -> None:
+    if dataset.formal_evaluation_ready and not dataset.data_alignment_ready:
+        raise SchemaError("formal_evaluation_ready requires data_alignment_ready.")
+    if not dataset.data_alignment_ready:
+        return
+    required = (
+        dataset.atlas,
+        dataset.roi_alignment,
+        dataset.tau_measurement,
+        dataset.tau_reference,
+        dataset.sc_weight_type,
+        dataset.laplacian_kind,
+    )
+    if any(value == UNKNOWN_PROVENANCE for value in required):
+        raise SchemaError("data_alignment_ready requires explicit provenance fields.")
