@@ -174,7 +174,7 @@ def run_json_worker(
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
                 error = str(payload.get("error", "worker reported failure"))
-                raise PySrWorkerError(
+                raise PySRWorkerError(
                     error,
                     returncode=process.returncode,
                     stdout=stdout,
@@ -200,13 +200,13 @@ def run_json_worker(
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
                 if result.exists():
-                    raise PySrWorkerError(
+                    raise PySRWorkerError(
                         "worker result is malformed or incomplete.",
                         returncode=returncode,
                         stdout=stdout,
                         stderr=stderr,
                     )
-                raise PySrWorkerError(
+                raise PySRWorkerError(
                     "worker failed before producing a result.",
                     returncode=returncode,
                     stdout=stdout,
@@ -217,7 +217,7 @@ def run_json_worker(
                 cleanup_required = _terminate_owned_worker(process, shutdown_grace)
                 stdout = _read_text(stdout_path)
                 stderr = _read_text(stderr_path)
-                raise PySrWorkerError(
+                raise PySRWorkerError(
                     "worker timed out before producing a result.",
                     returncode=process.returncode,
                     stdout=stdout,

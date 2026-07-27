@@ -1,19 +1,26 @@
 from __future__ import annotations
+
 import argparse
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
 
 from tau_sr.graphs import build_graph_laplacian
+from tau_sr.neural import NeuralReactionDiffusion
 from tau_sr.sr_model_3 import train_model
 from tau_sr.symbolic import (
     SymbolicRegressionConfig,
     fit_symbolic_reaction,
     sample_neural_reaction,
 )
-from tau_sr.synthetic import SyntheticCohortConfig, build_connectome_representations, generate_count_connectome, generate_edge_attributes
-from tau_sr.neural import NeuralReactionDiffusion
+from tau_sr.synthetic import (
+    SyntheticCohortConfig,
+    build_connectome_representations,
+    generate_count_connectome,
+    generate_edge_attributes,
+)
+
 
 def load_tau_pet_excel(file_path: str):
     df = pd.read_excel(file_path)
@@ -66,9 +73,7 @@ def create_synthetic_laplacian_from_config(
     network_type: str = "length_adjusted",
     kind: str = "unnormalized",
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Generates synthetic connectomes and converts a selected network representation
-
-    into a Graph Laplacian.
+    """Generate synthetic connectomes and return a selected Graph Laplacian.
 
     Parameters
     ----------
@@ -118,10 +123,10 @@ def create_synthetic_laplacian_from_config(
 
     adjacency = networks[network_type]
     L = build_graph_laplacian(adjacency, kind=kind)
-    L = torch.from_numpy(L)
-    return L
+    return L, networks
 
-L = create_synthetic_laplacian_from_config()
+L_ARRAY, NETWORKS = create_synthetic_laplacian_from_config()
+L = torch.as_tensor(L_ARRAY, dtype=torch.float32)
 
 def main(L):
     parser = argparse.ArgumentParser(
@@ -155,6 +160,11 @@ def main(L):
     print(f"   Loaded {n_pairs} scan pairs across {n_nodes} regions.")
 
     NNmodel = NeuralReactionDiffusion(hidden_width=16, initial_rho=0.1)
+    model_param = next(NNmodel.parameters())
+    y0 = y0.to(device=model_param.device, dtype=model_param.dtype)
+    dt = dt.to(device=model_param.device, dtype=model_param.dtype)
+    y_target = y_target.to(device=model_param.device, dtype=model_param.dtype)
+    laplacian = torch.as_tensor(L, device=model_param.device, dtype=model_param.dtype)
 
     # 3. Fit Neural ODE Model
     print(
@@ -162,7 +172,7 @@ def main(L):
     )
     model = train_model(
         model=NNmodel,
-        laplacian=L,
+        laplacian=laplacian,
         y0=y0,
         dt=dt,
         y_target=y_target,

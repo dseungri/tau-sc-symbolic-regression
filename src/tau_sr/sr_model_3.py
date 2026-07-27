@@ -253,7 +253,7 @@ def sr(
 
 
 # run entire sr and NN
-def run_pipeline(excel_path: str = "Tau_PET.xlsx", solver: str = "euler"):
+def run_pipeline(excel_path: str = "pilot_tau_workbook.xlsx", solver: str = "euler"):
     # Step 1: Load Data
     y0, dt, y_target, metadata, node_names = load_tau_pet_excel(excel_path)
     n_nodes = y0.shape[1]
@@ -297,4 +297,6 @@ def run_pipeline(excel_path: str = "Tau_PET.xlsx", solver: str = "euler"):
 
     return model, pysr_model
 
-model, pysr_model = run_pipeline(r"C:\Users\Jacob\Downloads\Tau_PET.xlsx", solver="rk4")
+
+if __name__ == "__main__":
+    model, pysr_model = run_pipeline(r"pilot_tau_workbook.xlsx", solver="rk4")
