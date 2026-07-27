@@ -210,6 +210,7 @@ def _load_tau_workbook(path: str | Path, *, n_regions: int) -> _TauData:
     seen_visits: set[tuple[str, str]] = set()
     dates_by_subject: dict[str, set[dt.date]] = {}
     visits_by_subject: dict[str, list[tuple[dt.date, np.ndarray]]] = {}
+    missing_count = 0
     finite_count = 0
 
     for row in rows:
@@ -225,7 +226,9 @@ def _load_tau_workbook(path: str | Path, *, n_regions: int) -> _TauData:
             raise SchemaError("tau workbook contains duplicate visit dates.")
         used_dates.add(exam_date)
         values = np.asarray([_float_cell(row.get(column)) for column in node_columns], dtype=float)
-        finite_count += int(values.size)
+        finite_mask = np.isfinite(values)
+        finite_count += int(np.count_nonzero(finite_mask))
+        missing_count += int(values.size - np.count_nonzero(finite_mask))
         visits_by_subject.setdefault(source_id, []).append((exam_date, values))
 
     subjects: list[_TauSubject] = []
@@ -248,7 +251,7 @@ def _load_tau_workbook(path: str | Path, *, n_regions: int) -> _TauData:
         )
     return _TauData(
         subjects=tuple(subjects),
-        missing_count=0,
+        missing_count=missing_count,
         finite_count=finite_count,
         n_regions=n_regions,
     )
@@ -268,12 +271,21 @@ def _load_connectomes(
     used: set[Path] = set()
     output: list[tuple[np.ndarray, np.ndarray, dict[str, float | bool]]] = []
     for subject in subjects:
-        matches = [path for path in path_objects if subject.source_id in path.name]
+        matches = [
+            path
+            for path in path_objects
+            if _filename_has_subject_token(path.name, subject.source_id)
+        ]
         if len(matches) != 1 or matches[0] in used:
             raise SchemaError("Each pilot subject must match exactly one connectome file.")
         used.add(matches[0])
         output.append(_load_connectome(matches[0], laplacian_kind=laplacian_kind))
     return tuple(output)
+
+
+def _filename_has_subject_token(filename: str, source_id: str) -> bool:
+    token_pattern = rf"(?<![A-Za-z0-9]){re.escape(source_id)}(?![A-Za-z0-9])"
+    return re.search(token_pattern, filename) is not None
 
 
 def _load_connectome(
@@ -439,13 +451,13 @@ def _parse_date(value: object) -> dt.date:
 
 def _float_cell(value: object) -> float:
     if value is None or (isinstance(value, str) and not value.strip()):
-        raise SchemaError("tau workbook contains missing node values.")
+        return math.nan
     try:
         number = float(value)
     except (TypeError, ValueError) as exc:
         raise SchemaError("tau workbook node values must be numeric.") from exc
     if not math.isfinite(number):
-        raise SchemaError("tau workbook node values must be finite.")
+        return math.nan
     return number
 
 

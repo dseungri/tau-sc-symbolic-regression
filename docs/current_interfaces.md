@@ -445,9 +445,12 @@ inspect_pilot_inputs(
 
 This structural inspection helper returns only privacy-safe aggregate metadata:
 neutral subject counts, neutral visit counts, relative elapsed times, node count,
-missing tau count, SC shapes, symmetrization validity, minimum degree, and that
-the ROI lookup is still required. It does not return rows, arrays, identifiers,
-dates, filenames, paths, demographics, or source-to-neutral mappings.
+`missing_tau_values`, SC shapes, symmetrization validity, minimum degree, and
+that the ROI lookup is still required. `missing_tau_values` counts blank,
+missing, or non-finite tau node cells normalized to `NaN` during workbook
+inspection; finite node cells are counted separately internally. The helper does
+not return rows, arrays, identifiers, dates, filenames, paths, demographics, or
+source-to-neutral mappings.
 
 ### Synthetic Linear-Quadratic Reaction Law
 

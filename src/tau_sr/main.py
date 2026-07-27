@@ -66,9 +66,7 @@ def create_synthetic_laplacian_from_config(
     network_type: str = "length_adjusted",
     kind: str = "unnormalized",
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Generates synthetic connectomes and converts a selected network representation
-
-    into a Graph Laplacian.
+    """Generate synthetic connectomes and return a selected Graph Laplacian.
 
     Parameters
     ----------
@@ -118,10 +116,9 @@ def create_synthetic_laplacian_from_config(
 
     adjacency = networks[network_type]
     L = build_graph_laplacian(adjacency, kind=kind)
-    L = torch.from_numpy(L)
-    return L
+    return L, networks
 
-L = create_synthetic_laplacian_from_config()
+L, NETWORKS = create_synthetic_laplacian_from_config()
 
 def main(L):
     parser = argparse.ArgumentParser(

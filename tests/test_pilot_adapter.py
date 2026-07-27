@@ -153,7 +153,36 @@ def test_load_pilot_dataset_sorts_visits_symmetrizes_and_uses_neutral_labels(
     assert "SUBJECT_A" not in repr(dataset)
 
 
-def test_tau_validation_rejects_bad_node_values_and_duplicate_visits(tmp_path: Path) -> None:
+def test_connectome_matching_uses_complete_subject_tokens(tmp_path: Path) -> None:
+    rows = [
+        ["S1", "SCAN_1", 10000, "drop", 70, *_node_values(0.0)],
+        ["S1", "SCAN_2", 10366, "drop", 70, *_node_values(0.1)],
+        ["S10", "SCAN_1", 20000, "drop", 70, *_node_values(0.2)],
+        ["S10", "SCAN_2", 20366, "drop", 70, *_node_values(0.3)],
+    ]
+    tau = _tau_workbook(tmp_path / "tau.xlsx", rows=rows)
+    s1_connectome = tmp_path / "S1_matrix.csv"
+    s10_connectome = tmp_path / "S10_matrix.csv"
+    np.savetxt(s1_connectome, _connectome_matrix(), delimiter=",")
+    np.savetxt(s10_connectome, _connectome_matrix() * 1.1, delimiter=",")
+
+    summary = inspect_pilot_inputs(tau, (s10_connectome, s1_connectome))
+
+    assert summary["subject_count"] == 2
+    assert summary["connectome_shapes"] == (
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+    )
+
+    embedded_s10_connectome = tmp_path / "S10matrix.csv"
+    np.savetxt(embedded_s10_connectome, _connectome_matrix() * 1.1, delimiter=",")
+    with pytest.raises(SchemaError, match="exactly one connectome"):
+        inspect_pilot_inputs(tau, (s1_connectome, embedded_s10_connectome))
+
+
+def test_tau_validation_counts_missing_node_values_and_rejects_duplicate_visits(
+    tmp_path: Path,
+) -> None:
     connectomes = _connectomes(tmp_path)
     bad_rows = [
         ["SUBJECT_A", "SCAN_A_1", 10000, "drop", 70, *_node_values(0.0)],
@@ -168,9 +197,19 @@ def test_tau_validation_rejects_bad_node_values_and_duplicate_visits(tmp_path: P
     missing_rows = copy.deepcopy(bad_rows)
     missing_rows[1][1] = "SCAN_A_2"
     missing_rows[0][5] = math.nan
-    with pytest.raises(SchemaError, match="finite"):
+    missing_rows[0][6] = math.inf
+    missing_rows[1][7] = None
+    summary = inspect_pilot_inputs(
+        _tau_workbook(tmp_path / "missing.xlsx", rows=missing_rows),
+        connectomes[:1],
+    )
+    assert summary["missing_tau_values"] == 3
+
+    nonnumeric_rows = copy.deepcopy(missing_rows)
+    nonnumeric_rows[0][8] = "not numeric"
+    with pytest.raises(SchemaError, match="numeric"):
         inspect_pilot_inputs(
-            _tau_workbook(tmp_path / "nonfinite.xlsx", rows=missing_rows),
+            _tau_workbook(tmp_path / "nonnumeric.xlsx", rows=nonnumeric_rows),
             connectomes[:1],
         )
 

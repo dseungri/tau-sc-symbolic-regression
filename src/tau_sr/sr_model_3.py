@@ -297,4 +297,6 @@ def run_pipeline(excel_path: str = "pilot_tau_workbook.xlsx", solver: str = "eul
 
     return model, pysr_model
 
-model, pysr_model = run_pipeline(r"pilot_tau_workbook.xlsx", solver="rk4")
+
+if __name__ == "__main__":
+    model, pysr_model = run_pipeline(r"pilot_tau_workbook.xlsx", solver="rk4")
