@@ -358,6 +358,97 @@ ground-truth reaction law, add observation noise, split subjects into training
 and test sets, or apply clipping, nonnegativity projection, or biological bounds.
 It can later accept validated arrays derived from real data.
 
+### Pilot longitudinal adapter
+
+Defined in `pilot_adapter.py`
+
+```python
+@dataclass(frozen=True)
+class LongitudinalTrajectoryDataset:
+    subject_ids: tuple[str, ...]
+    roi_labels: tuple[str, ...]
+    adjacencies: np.ndarray
+    laplacians: np.ndarray
+    times_by_subject: tuple[np.ndarray, ...]
+    trajectories: tuple[np.ndarray, ...]
+    tau_measurement: str = "SUVR"
+    tau_reference: str = "pending_exact_confirmation"
+    sc_weight_type: str = "normalized_fiber_count"
+    laplacian_kind: str = "symmetric_normalized"
+
+    @property
+    def baseline_states(self) -> np.ndarray:
+        ...
+```
+
+`LongitudinalTrajectoryDataset` is the real-data-facing model-input contract.
+It contains neutral subject labels only, no source identifiers, no scan IDs, no
+exact dates, no demographics, no raw paths, and no synthetic truth fields such as
+true rho or reaction coefficients. Arrays are copied and stored read-only.
+`baseline_states` is derived from the first trajectory row instead of stored as
+duplicated input.
+
+```python
+load_pilot_dataset(
+    tau_workbook_path,
+    connectome_paths,
+    *,
+    roi_labels,
+    tau_reference="pending_exact_confirmation",
+    laplacian_kind="symmetric_normalized",
+) -> LongitudinalTrajectoryDataset
+```
+
+The pilot loader expects one local tau workbook, two local headerless numeric SC
+CSV matrices, and an explicit ordered 160-label ROI sequence. The ordered ROI
+labels are mandatory; without them, dataset construction raises:
+
+```text
+An ordered 160-region ROI lookup is required before model training.
+```
+
+The tau workbook is read locally. The loader uses source subject IDs, scan IDs,
+and exact exam dates only transiently for grouping, uniqueness checks, matching,
+sorting, and conversion to elapsed years. Relative time is computed as days from
+each subject's baseline divided by `365.25`. Diagnostic and demographic columns
+are ignored and are not passed to the model.
+
+The pilot tau values are SUVR. The exact reference-region wording is pending
+confirmation, so the default metadata is
+`tau_reference="pending_exact_confirmation"`.
+
+Each connectome is interpreted as static subject-specific normalized fiber-count
+weights. Values are not renormalized. SC preprocessing is:
+
+```python
+W = 0.5 * (W_raw + W_raw.T)
+np.fill_diagonal(W, 0.0)
+```
+
+The adapter validates finite nonnegative weights, zero raw diagonal, exact
+post-symmetry, zero post-symmetry diagonal, and strictly positive weighted
+degree, then delegates Laplacian construction to `build_graph_laplacian`.
+
+The pilot has 160 nodes. The atlas is described as Destrieux with additional
+subcortical regions; the final 16 labels are intended to be subcortical, but the
+exact ordered lookup remains the training-readiness gate. Two subjects are
+sufficient for file-format validation and an end-to-end pilot adapter smoke
+check, but not for an honest subject-level train/validation/test evaluation. No
+real-data mechanistic or generalization claims should be made at this phase.
+
+```python
+inspect_pilot_inputs(
+    tau_workbook_path,
+    connectome_paths,
+) -> dict[str, object]
+```
+
+This structural inspection helper returns only privacy-safe aggregate metadata:
+neutral subject counts, neutral visit counts, relative elapsed times, node count,
+missing tau count, SC shapes, symmetrization validity, minimum degree, and that
+the ROI lookup is still required. It does not return rows, arrays, identifiers,
+dates, filenames, paths, demographics, or source-to-neutral mappings.
+
 ### Synthetic Linear-Quadratic Reaction Law
 
 Defined in `reactions.py`

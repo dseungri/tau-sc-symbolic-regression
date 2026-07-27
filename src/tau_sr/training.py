@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from tau_sr.neural import NeuralReactionDiffusion
+from tau_sr.pilot_adapter import LongitudinalTrajectoryDataset
 from tau_sr.reactions import make_linear_quadratic_reaction
 from tau_sr.recovery import SyntheticRecoveryDataset
 from tau_sr.schemas import SchemaError
@@ -21,9 +22,12 @@ __all__ = (
     "NeuralTrainingResult",
     "SubjectSplit",
     "evaluate_neural_recovery",
+    "fit_recovery_model",
     "fit_noise_free_recovery_model",
     "make_subject_split",
 )
+
+TrajectoryDataset = SyntheticRecoveryDataset | LongitudinalTrajectoryDataset
 
 
 @dataclass(frozen=True)
@@ -234,9 +238,35 @@ def fit_noise_free_recovery_model(
     *,
     model: NeuralReactionDiffusion | None = None,
 ) -> NeuralTrainingResult:
-    """Fit a new neural reaction-diffusion model using train and validation subjects only."""
+    """Backward-compatible synthetic wrapper around generic trajectory fitting."""
 
     _require_dataset(dataset)
+    return _fit_recovery_model_checked(dataset, split, config, model=model)
+
+
+def fit_recovery_model(
+    dataset: LongitudinalTrajectoryDataset,
+    split: SubjectSplit,
+    config: NeuralTrainingConfig,
+    *,
+    model: NeuralReactionDiffusion | None = None,
+) -> NeuralTrainingResult:
+    """Fit a neural reaction-diffusion model to a generic longitudinal dataset."""
+
+    if not isinstance(dataset, LongitudinalTrajectoryDataset):
+        raise SchemaError("dataset must be a LongitudinalTrajectoryDataset.")
+    return _fit_recovery_model_checked(dataset, split, config, model=model)
+
+
+def _fit_recovery_model_checked(
+    dataset: TrajectoryDataset,
+    split: SubjectSplit,
+    config: NeuralTrainingConfig,
+    *,
+    model: NeuralReactionDiffusion | None,
+) -> NeuralTrainingResult:
+    """Fit a model using train subjects and validation-best restoration."""
+
     checked_split = _validate_split_for_dataset(split, dataset)
     checked_config = _validate_training_config(config)
     device = torch.device(checked_config.device)
@@ -530,7 +560,7 @@ def _optimizer_parameter_groups(
 
 def _split_trajectory_loss(
     model: NeuralReactionDiffusion,
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
     subject_indices: Sequence[int],
     *,
     max_step: float,
@@ -556,7 +586,7 @@ def _split_trajectory_loss(
 
 def _subject_group_trajectory_losses(
     model: NeuralReactionDiffusion,
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
     subject_indices: Sequence[int],
     *,
     max_step: float,
@@ -611,7 +641,7 @@ def _subject_group_trajectory_losses(
 
 
 def _subject_groups_by_time(
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
     subject_indices: Sequence[int],
 ) -> tuple[tuple[int, ...], ...]:
     groups: dict[tuple[float, ...], list[int]] = {}
@@ -627,7 +657,7 @@ def _subject_groups_by_time(
 
 
 def _subject_tensors(
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
     subject_index: int,
     *,
     device: torch.device,
@@ -670,7 +700,7 @@ def _subject_tensors(
 
 
 def _validate_fit_subjects(
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
     subject_indices: Sequence[int],
 ) -> None:
     for subject_index in subject_indices:
@@ -685,7 +715,7 @@ def _validate_fit_subjects(
 
 def _validate_split_for_dataset(
     split: SubjectSplit,
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
 ) -> SubjectSplit:
     if not isinstance(split, SubjectSplit):
         raise SchemaError("split must be a SubjectSplit.")
@@ -708,7 +738,7 @@ def _validate_split_for_dataset(
 def _validate_indices_for_dataset(
     indices: object,
     field_name: str,
-    dataset: SyntheticRecoveryDataset,
+    dataset: TrajectoryDataset,
 ) -> tuple[int, ...]:
     checked = _validate_index_tuple(indices, field_name)
     subject_count = _dataset_subject_count(dataset)
@@ -769,11 +799,11 @@ def _require_dataset(dataset: object) -> SyntheticRecoveryDataset:
     return dataset
 
 
-def _dataset_subject_count(dataset: SyntheticRecoveryDataset) -> int:
+def _dataset_subject_count(dataset: TrajectoryDataset) -> int:
     return len(dataset.subject_ids)
 
 
-def _dataset_region_count(dataset: SyntheticRecoveryDataset) -> int:
+def _dataset_region_count(dataset: TrajectoryDataset) -> int:
     return len(dataset.roi_labels)
 
 
