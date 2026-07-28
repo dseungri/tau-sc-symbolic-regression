@@ -276,8 +276,12 @@ def load_selected_pilot_training_config(
         dtype=_dtype_from_string(str(config_payload.get("dtype", "torch.float64"))),
         device=str(config_payload.get("device", "cpu")),
     )
+    try:
+        artifact_label = str(artifact.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        artifact_label = artifact.name
     source = {
-        "artifact": "experiments/results/identifiability_experiment.json",
+        "artifact": artifact_label,
         "selected_candidate": str(record.get("candidate_name")),
         "model_type": str(record.get("model_type")),
         "best_epoch_zero_indexed": best_epoch,
