@@ -380,6 +380,22 @@ def test_ready_dataset_requires_explicit_provenance() -> None:
             data_alignment_ready=True,
         )
 
+    with pytest.raises(SchemaError, match="explicit provenance"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            data_alignment_ready=True,
+            formal_evaluation_ready=True,
+        )
+
+
+def test_formal_evaluation_readiness_requires_data_alignment() -> None:
+    synthetic = _small_synthetic_dataset()
+
     with pytest.raises(SchemaError, match="data_alignment_ready"):
         LongitudinalTrajectoryDataset(
             subject_ids=synthetic.subject_ids,
