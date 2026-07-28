@@ -158,12 +158,18 @@ class FixedEpochTrainingResult:
         if not isinstance(self.model, NeuralReactionDiffusion):
             raise SchemaError("model must be a NeuralReactionDiffusion.")
         subject_indices = _validate_index_tuple(self.subject_indices, "subject_indices")
-        training_losses = _validate_loss_history(self.training_losses, "training_losses")
-        _require_int(self.epochs_run, "epochs_run", minimum=1)
+        training_losses = _validate_loss_history(
+            self.training_losses,
+            "training_losses",
+            allow_empty=True,
+        )
+        _require_int(self.epochs_run, "epochs_run", minimum=0)
         if self.epochs_run != len(training_losses):
             raise SchemaError("epochs_run must match loss-history length.")
         if not isinstance(self.numerical_instability, bool):
             raise SchemaError("numerical_instability must be a boolean.")
+        if not training_losses and not self.numerical_instability:
+            raise SchemaError("training_losses must be nonempty unless training was unstable.")
 
         object.__setattr__(self, "subject_indices", subject_indices)
         object.__setattr__(self, "training_losses", training_losses)
@@ -315,23 +321,30 @@ def fit_fixed_epoch_recovery_model(
     )
     optimizer = _make_optimizer(fit_model, checked_config)
     training_losses: list[float] = []
+    numerical_instability = False
 
     for _epoch in range(n_epochs):
         fit_model.train()
         optimizer.zero_grad()
-        training_loss = _split_trajectory_loss(
-            fit_model,
-            dataset,
-            checked_indices,
-            max_step=checked_config.max_step,
-            device=device,
-            dtype=dtype,
-        )
-        _validate_finite_tensor(training_loss, "training loss")
-        training_loss.backward()
-        _validate_finite_gradients(fit_model)
-        optimizer.step()
-        _validate_finite_parameters(fit_model)
+        try:
+            training_loss = _split_trajectory_loss(
+                fit_model,
+                dataset,
+                checked_indices,
+                max_step=checked_config.max_step,
+                device=device,
+                dtype=dtype,
+            )
+            _validate_finite_tensor(training_loss, "training loss")
+            training_loss.backward()
+            _validate_finite_gradients(fit_model)
+            optimizer.step()
+            _validate_finite_parameters(fit_model)
+        except SchemaError as exc:
+            if not _is_recoverable_numerical_error(exc):
+                raise
+            numerical_instability = True
+            break
         training_losses.append(float(training_loss.detach().cpu().item()))
 
     fit_model.eval()
@@ -339,8 +352,8 @@ def fit_fixed_epoch_recovery_model(
         model=fit_model,
         subject_indices=checked_indices,
         training_losses=tuple(training_losses),
-        epochs_run=n_epochs,
-        numerical_instability=False,
+        epochs_run=len(training_losses),
+        numerical_instability=numerical_instability,
     )
 
 
@@ -998,17 +1011,27 @@ def _clone_state_dict(model: NeuralReactionDiffusion) -> dict[str, torch.Tensor]
     }
 
 
-def _validate_loss_history(values: object, field_name: str) -> tuple[float, ...]:
+def _validate_loss_history(
+    values: object,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+) -> tuple[float, ...]:
     if isinstance(values, np.ndarray):
         raw_values = tuple(values.tolist())
     elif isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
         raise SchemaError(f"{field_name} must be a sequence of losses.")
     else:
         raw_values = tuple(values)
-    if not raw_values:
+    if not raw_values and not allow_empty:
         raise SchemaError(f"{field_name} must be nonempty.")
     checked = tuple(_require_real_scalar(value, field_name, minimum=0.0) for value in raw_values)
     return checked
+
+
+def _is_recoverable_numerical_error(error: SchemaError) -> bool:
+    message = str(error)
+    return "must contain only finite values" in message or message.startswith("gradient for ")
 
 
 def _mean_checked(values: Sequence[float], field_name: str) -> float:

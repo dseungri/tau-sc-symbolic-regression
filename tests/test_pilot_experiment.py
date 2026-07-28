@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import stat
 import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -154,8 +156,19 @@ def test_pilot_qc_summary_and_validation_accept_expected_contract() -> None:
     assert summary["subject_count"] == 2
     assert summary["region_count"] == PILOT_N_REGIONS
     assert summary["visit_count_pattern"] == (2, 3)
+    assert summary["missing_tau_values"] == 0
+    assert summary["tau_values_missing"] is False
     assert summary["subject_specific_laplacians"] is True
     assert summary["final_12_nodes_subcortical"] is True
+
+
+def test_pilot_qc_validation_rejects_missing_tau_values() -> None:
+    summary = pilot.pilot_qc_summary(_fake_pilot_dataset(), missing_tau_values=3)
+
+    assert summary["missing_tau_values"] == 3
+    assert summary["tau_values_missing"] is True
+    with pytest.raises(SchemaError, match="pilot QC failed"):
+        pilot.validate_pilot_qc(summary)
 
 
 def test_pilot_qc_validation_rejects_failed_contract() -> None:
@@ -245,6 +258,21 @@ def test_validate_private_output_directory_rejects_unignored_repo_directory() ->
             target.rmdir()
 
 
+def test_private_output_directory_default_and_created_mode_are_private(
+    tmp_path: Path,
+) -> None:
+    assert pilot.DEFAULT_PRIVATE_OUTPUT_DIR.is_relative_to(Path.home())
+
+    target = tmp_path / "pilot_output"
+    target.mkdir(mode=0o755)
+    target.chmod(0o755)
+
+    output_dir = pilot.validate_private_output_directory(target)
+
+    assert output_dir == target.resolve()
+    assert stat.S_IMODE(output_dir.stat().st_mode) == 0o700
+
+
 def test_run_symbolic_distillation_uses_training_domain_and_declared_pysr_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -317,6 +345,44 @@ def test_run_symbolic_distillation_uses_training_domain_and_declared_pysr_config
     assert str(tmp_path / "pysr_artifacts") == captured["output_directory"]
     assert summary["artifact_directory"] == str(tmp_path / "pysr_artifacts")
     assert "symbolic_vs_true_rmse" not in summary["polynomial_interpretation"]
+
+
+def test_run_pilot_experiment_uses_adapter_missing_tau_count_for_qc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset = _fake_pilot_dataset()
+    original_qc_summary = pilot.pilot_qc_summary
+    captured: dict[str, int] = {}
+
+    monkeypatch.setattr(pilot, "load_pilot_dataset", lambda *_args: dataset)
+    monkeypatch.setattr(
+        pilot,
+        "inspect_pilot_inputs",
+        lambda *_args: {"relative_times_years": {}, "missing_tau_values": 2},
+    )
+
+    def qc_summary_spy(
+        dataset_arg: LongitudinalTrajectoryDataset,
+        *,
+        missing_tau_values: int = 0,
+    ) -> dict[str, object]:
+        captured["missing_tau_values"] = missing_tau_values
+        return original_qc_summary(
+            dataset_arg,
+            missing_tau_values=missing_tau_values,
+        )
+
+    monkeypatch.setattr(pilot, "pilot_qc_summary", qc_summary_spy)
+
+    with pytest.raises(SchemaError, match="pilot QC failed"):
+        pilot.run_pilot_experiment(
+            "/tmp/sentinel_tau_input.xlsx",
+            ("/tmp/sentinel_connectome_a.csv", "/tmp/sentinel_connectome_b.csv"),
+            output_directory=tmp_path / "private_outputs",
+        )
+
+    assert captured["missing_tau_values"] == 2
 
 
 def test_run_pilot_experiment_writes_private_summary_without_raw_inputs(
@@ -395,7 +461,10 @@ def test_run_pilot_experiment_writes_private_summary_without_raw_inputs(
 
     artifact_path = Path(str(summary["private_artifact_path"]))
     artifact_text = artifact_path.read_text(encoding="utf-8")
+    artifact = json.loads(artifact_text)
     assert artifact_path.exists()
+    assert artifact["dataset_summary"]["missing_tau_values"] == 0
+    assert artifact["dataset_summary"]["tau_values_missing"] is False
     assert "/tmp/sentinel_tau_input.xlsx" not in artifact_text
     assert "/tmp/sentinel_connectome_a.csv" not in artifact_text
     assert "/tmp/sentinel_connectome_b.csv" not in artifact_text

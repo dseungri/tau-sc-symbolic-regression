@@ -388,6 +388,89 @@ def test_fixed_epoch_training_uses_requested_epoch_count() -> None:
     assert all(math.isfinite(value) and value >= 0.0 for value in result.training_losses)
 
 
+@pytest.mark.parametrize(
+    ("validator_name", "error_message"),
+    [
+        ("_validate_finite_tensor", "training loss must contain only finite values."),
+        ("_validate_finite_gradients", "gradient for raw_rho must contain only finite values."),
+        (
+            "_validate_finite_parameters",
+            "model parameter raw_rho must contain only finite values.",
+        ),
+    ],
+)
+def test_fixed_epoch_training_stops_on_recoverable_numerical_instability(
+    monkeypatch: pytest.MonkeyPatch,
+    validator_name: str,
+    error_message: str,
+) -> None:
+    original_validator = getattr(training, validator_name)
+    calls = {"count": 0}
+
+    if validator_name == "_validate_finite_tensor":
+
+        def fail_on_second_training_loss(value: torch.Tensor, field_name: str) -> None:
+            if field_name == "training loss":
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise SchemaError(error_message)
+            original_validator(value, field_name)
+
+        monkeypatch.setattr(
+            training,
+            validator_name,
+            fail_on_second_training_loss,
+        )
+    else:
+
+        def fail_on_second_call(model: NeuralReactionDiffusion) -> None:
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise SchemaError(error_message)
+            original_validator(model)
+
+        monkeypatch.setattr(training, validator_name, fail_on_second_call)
+
+    result = fit_fixed_epoch_recovery_model(
+        _base_dataset(),
+        _small_split().train_indices,
+        _small_config(),
+        n_epochs=4,
+    )
+
+    assert isinstance(result, FixedEpochTrainingResult)
+    assert result.numerical_instability is True
+    assert result.epochs_run == 1
+    assert len(result.training_losses) == 1
+    assert result.model.training is False
+
+
+def test_fixed_epoch_training_can_return_zero_losses_for_immediate_instability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_validator = training._validate_finite_tensor
+
+    def fail_training_loss(value: torch.Tensor, field_name: str) -> None:
+        if field_name == "training loss":
+            raise SchemaError("training loss must contain only finite values.")
+        original_validator(value, field_name)
+
+    monkeypatch.setattr(training, "_validate_finite_tensor", fail_training_loss)
+
+    result = fit_fixed_epoch_recovery_model(
+        _base_dataset(),
+        _small_split().train_indices,
+        _small_config(),
+        n_epochs=4,
+    )
+
+    assert isinstance(result, FixedEpochTrainingResult)
+    assert result.numerical_instability is True
+    assert result.epochs_run == 0
+    assert result.training_losses == ()
+    assert result.model.training is False
+
+
 def test_fixed_epoch_training_reuses_rho_optimizer_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

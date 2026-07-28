@@ -49,7 +49,7 @@ from tau_sr.training import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_ARTIFACT = REPO_ROOT / "experiments/results/identifiability_experiment.json"
-DEFAULT_PRIVATE_OUTPUT_DIR = Path(tempfile.gettempdir()) / "tau_sr_private_pilot"
+DEFAULT_PRIVATE_OUTPUT_DIR = Path.home() / ".tau_sr_private_pilot"
 DEFAULT_PYSR_N_SAMPLES = 500
 DEFAULT_PYSR_NITERATIONS = 100
 DEFAULT_PYSR_POPULATIONS = 15
@@ -89,11 +89,20 @@ class PilotTemporalHoldout:
         return (0, 1)
 
 
-def pilot_qc_summary(dataset: LongitudinalTrajectoryDataset) -> dict[str, object]:
+def pilot_qc_summary(
+    dataset: LongitudinalTrajectoryDataset,
+    *,
+    missing_tau_values: int = 0,
+) -> dict[str, object]:
     """Return aggregate QC fields for the confirmed two-subject pilot contract."""
 
     if not isinstance(dataset, LongitudinalTrajectoryDataset):
         raise SchemaError("dataset must be a LongitudinalTrajectoryDataset.")
+    missing_count = _nonnegative_int(missing_tau_values, "missing_tau_values")
+    nonfinite_tau_count = sum(
+        int(trajectory.size - np.count_nonzero(np.isfinite(trajectory)))
+        for trajectory in dataset.trajectories
+    )
     degrees = dataset.adjacencies.sum(axis=2)
     visit_counts = tuple(int(trajectory.shape[0]) for trajectory in dataset.trajectories)
     return {
@@ -111,7 +120,8 @@ def pilot_qc_summary(dataset: LongitudinalTrajectoryDataset) -> dict[str, object
         "tau_values_finite": all(
             np.isfinite(trajectory).all() for trajectory in dataset.trajectories
         ),
-        "tau_values_missing": False,
+        "missing_tau_values": missing_count,
+        "tau_values_missing": missing_count > 0 or nonfinite_tau_count > 0,
         "adjacency_shapes": tuple(tuple(adjacency.shape) for adjacency in dataset.adjacencies),
         "laplacian_shapes": tuple(tuple(laplacian.shape) for laplacian in dataset.laplacians),
         "adjacencies_finite": bool(np.isfinite(dataset.adjacencies).all()),
@@ -320,9 +330,15 @@ def run_pilot_experiment(
     output_dir = validate_private_output_directory(
         DEFAULT_PRIVATE_OUTPUT_DIR if output_directory is None else output_directory
     )
-    dataset = load_pilot_dataset(tau_workbook_path, connectome_paths)
     adapter_summary = inspect_pilot_inputs(tau_workbook_path, connectome_paths)
-    qc = pilot_qc_summary(dataset)
+    dataset = load_pilot_dataset(tau_workbook_path, connectome_paths)
+    qc = pilot_qc_summary(
+        dataset,
+        missing_tau_values=_nonnegative_int(
+            adapter_summary.get("missing_tau_values", 0),
+            "missing_tau_values",
+        ),
+    )
     validate_pilot_qc(qc)
     holdout = build_temporal_holdout(dataset)
     config, n_epochs, config_source = load_selected_pilot_training_config(config_artifact_path)
@@ -613,7 +629,8 @@ def validate_private_output_directory(path: str | Path) -> Path:
         )
         if ignored.returncode != 0:
             raise SchemaError("output directory inside the repository must be git-ignored.")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    output_dir.chmod(0o700)
     return output_dir
 
 
@@ -689,6 +706,8 @@ def _safe_dataset_summary(
         "adjacency_shapes": qc["adjacency_shapes"],
         "laplacian_shapes": qc["laplacian_shapes"],
         "symmetrization_valid": qc["adjacencies_symmetric"],
+        "missing_tau_values": qc["missing_tau_values"],
+        "tau_values_missing": qc["tau_values_missing"],
         "minimum_degree": qc["minimum_degree"],
         "roi_alignment": qc["roi_alignment"],
         "data_alignment_ready": qc["data_alignment_ready"],
@@ -828,6 +847,15 @@ def _int_field(mapping: dict[str, object], key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise SchemaError(f"{key} must be an integer.")
     return value
+
+
+def _nonnegative_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise SchemaError(f"{field_name} must be an integer.")
+    output = int(value)
+    if output < 0:
+        raise SchemaError(f"{field_name} must be nonnegative.")
+    return output
 
 
 def _float_field(mapping: dict[str, object], key: str) -> float:
