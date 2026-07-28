@@ -18,10 +18,12 @@ from tau_sr.schemas import SchemaError
 
 __all__ = (
     "NeuralRecoveryMetrics",
+    "FixedEpochTrainingResult",
     "NeuralTrainingConfig",
     "NeuralTrainingResult",
     "SubjectSplit",
     "evaluate_neural_recovery",
+    "fit_fixed_epoch_recovery_model",
     "fit_recovery_model",
     "fit_noise_free_recovery_model",
     "make_subject_split",
@@ -145,6 +147,35 @@ class NeuralTrainingResult:
 
 
 @dataclass(frozen=True)
+class FixedEpochTrainingResult:
+    model: NeuralReactionDiffusion
+    subject_indices: tuple[int, ...]
+    training_losses: tuple[float, ...]
+    epochs_run: int
+    numerical_instability: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, NeuralReactionDiffusion):
+            raise SchemaError("model must be a NeuralReactionDiffusion.")
+        subject_indices = _validate_index_tuple(self.subject_indices, "subject_indices")
+        training_losses = _validate_loss_history(
+            self.training_losses,
+            "training_losses",
+            allow_empty=True,
+        )
+        _require_int(self.epochs_run, "epochs_run", minimum=0)
+        if self.epochs_run != len(training_losses):
+            raise SchemaError("epochs_run must match loss-history length.")
+        if not isinstance(self.numerical_instability, bool):
+            raise SchemaError("numerical_instability must be a boolean.")
+        if not training_losses and not self.numerical_instability:
+            raise SchemaError("training_losses must be nonempty unless training was unstable.")
+
+        object.__setattr__(self, "subject_indices", subject_indices)
+        object.__setattr__(self, "training_losses", training_losses)
+
+
+@dataclass(frozen=True)
 class NeuralRecoveryMetrics:
     subject_indices: tuple[int, ...]
     trajectory_mse: float
@@ -256,6 +287,74 @@ def fit_recovery_model(
     if not isinstance(dataset, LongitudinalTrajectoryDataset):
         raise SchemaError("dataset must be a LongitudinalTrajectoryDataset.")
     return _fit_recovery_model_checked(dataset, split, config, model=model)
+
+
+def fit_fixed_epoch_recovery_model(
+    dataset: TrajectoryDataset,
+    subject_indices: Sequence[int],
+    config: NeuralTrainingConfig,
+    *,
+    model: NeuralReactionDiffusion | None = None,
+    n_epochs: int,
+) -> FixedEpochTrainingResult:
+    """Fit a trajectory model for a fixed number of epochs without validation."""
+
+    if not isinstance(dataset, (SyntheticRecoveryDataset, LongitudinalTrajectoryDataset)):
+        raise SchemaError("dataset must be a supported trajectory dataset.")
+    checked_indices = _validate_indices_for_dataset(
+        subject_indices,
+        "subject_indices",
+        dataset,
+    )
+    if not checked_indices:
+        raise SchemaError("subject_indices must be nonempty.")
+    _require_int(n_epochs, "n_epochs", minimum=1)
+    checked_config = _validate_training_config(config)
+    device = torch.device(checked_config.device)
+    dtype = checked_config.dtype
+
+    _validate_fit_subjects(dataset, checked_indices)
+    fit_model = (
+        _new_model(checked_config, device=device, dtype=dtype)
+        if model is None
+        else _prepare_supplied_model(model, device=device, dtype=dtype)
+    )
+    optimizer = _make_optimizer(fit_model, checked_config)
+    training_losses: list[float] = []
+    numerical_instability = False
+
+    for _epoch in range(n_epochs):
+        fit_model.train()
+        optimizer.zero_grad()
+        try:
+            training_loss = _split_trajectory_loss(
+                fit_model,
+                dataset,
+                checked_indices,
+                max_step=checked_config.max_step,
+                device=device,
+                dtype=dtype,
+            )
+            _validate_finite_tensor(training_loss, "training loss")
+            training_loss.backward()
+            _validate_finite_gradients(fit_model)
+            optimizer.step()
+            _validate_finite_parameters(fit_model)
+        except SchemaError as exc:
+            if not _is_recoverable_numerical_error(exc):
+                raise
+            numerical_instability = True
+            break
+        training_losses.append(float(training_loss.detach().cpu().item()))
+
+    fit_model.eval()
+    return FixedEpochTrainingResult(
+        model=fit_model,
+        subject_indices=checked_indices,
+        training_losses=tuple(training_losses),
+        epochs_run=len(training_losses),
+        numerical_instability=numerical_instability,
+    )
 
 
 def _fit_recovery_model_checked(
@@ -912,17 +1011,27 @@ def _clone_state_dict(model: NeuralReactionDiffusion) -> dict[str, torch.Tensor]
     }
 
 
-def _validate_loss_history(values: object, field_name: str) -> tuple[float, ...]:
+def _validate_loss_history(
+    values: object,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+) -> tuple[float, ...]:
     if isinstance(values, np.ndarray):
         raw_values = tuple(values.tolist())
     elif isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
         raise SchemaError(f"{field_name} must be a sequence of losses.")
     else:
         raw_values = tuple(values)
-    if not raw_values:
+    if not raw_values and not allow_empty:
         raise SchemaError(f"{field_name} must be nonempty.")
     checked = tuple(_require_real_scalar(value, field_name, minimum=0.0) for value in raw_values)
     return checked
+
+
+def _is_recoverable_numerical_error(error: SchemaError) -> bool:
+    message = str(error)
+    return "must contain only finite values" in message or message.startswith("gradient for ")
 
 
 def _mean_checked(values: Sequence[float], field_name: str) -> float:
