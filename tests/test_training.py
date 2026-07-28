@@ -13,11 +13,13 @@ from tau_sr.neural import NeuralReactionDiffusion
 from tau_sr.recovery import SyntheticRecoveryDataset
 from tau_sr.schemas import SchemaError
 from tau_sr.training import (
+    FixedEpochTrainingResult,
     NeuralRecoveryMetrics,
     NeuralTrainingConfig,
     NeuralTrainingResult,
     SubjectSplit,
     evaluate_neural_recovery,
+    fit_fixed_epoch_recovery_model,
     fit_noise_free_recovery_model,
     make_subject_split,
 )
@@ -367,6 +369,66 @@ def test_training_takes_optimizer_step_that_changes_model_parameters() -> None:
         not torch.allclose(result.model.state_dict()[name], initial_value)
         for name, initial_value in initial_state.items()
     )
+
+
+def test_fixed_epoch_training_uses_requested_epoch_count() -> None:
+    result = fit_fixed_epoch_recovery_model(
+        _base_dataset(),
+        _small_split().train_indices,
+        _small_config(max_epochs=7, patience=2),
+        n_epochs=3,
+    )
+
+    assert isinstance(result, FixedEpochTrainingResult)
+    assert isinstance(result.model, NeuralReactionDiffusion)
+    assert result.subject_indices == _small_split().train_indices
+    assert result.epochs_run == 3
+    assert len(result.training_losses) == 3
+    assert result.numerical_instability is False
+    assert all(math.isfinite(value) and value >= 0.0 for value in result.training_losses)
+
+
+def test_fixed_epoch_training_reuses_rho_optimizer_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    original_make_optimizer = training._make_optimizer
+
+    def spy_make_optimizer(
+        model: NeuralReactionDiffusion,
+        config: NeuralTrainingConfig,
+    ) -> torch.optim.Optimizer:
+        optimizer = original_make_optimizer(model, config)
+        observed["group_names"] = tuple(
+            group.get("name") for group in optimizer.param_groups
+        )
+        observed["learning_rates"] = tuple(
+            group["lr"] for group in optimizer.param_groups
+        )
+        return optimizer
+
+    monkeypatch.setattr(training, "_make_optimizer", spy_make_optimizer)
+
+    fit_fixed_epoch_recovery_model(
+        _base_dataset(),
+        _small_split().train_indices,
+        _small_config(rho_learning_rate=2e-3),
+        n_epochs=1,
+    )
+
+    assert observed["group_names"] == ("reaction", "rho")
+    assert observed["learning_rates"] == pytest.approx((1e-2, 2e-3))
+
+
+@pytest.mark.parametrize("n_epochs", [0, -1, True, 1.5])
+def test_fixed_epoch_training_rejects_invalid_epoch_count(n_epochs: object) -> None:
+    with pytest.raises(SchemaError, match="n_epochs"):
+        fit_fixed_epoch_recovery_model(
+            _base_dataset(),
+            _small_split().train_indices,
+            _small_config(),
+            n_epochs=n_epochs,  # type: ignore[arg-type]
+        )
 
 
 def test_returned_model_matches_best_validation_epoch() -> None:

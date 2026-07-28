@@ -91,13 +91,17 @@ def _run_worker(request_path: Path) -> dict[str, Any]:
         evaluation_payload["neural_prediction"],
         "evaluation.neural_prediction",
     )
-    true_prediction = _vector(
-        evaluation_payload["true_prediction"],
-        "evaluation.true_prediction",
+    true_prediction = (
+        None
+        if "true_prediction" not in evaluation_payload
+        else _vector(
+            evaluation_payload["true_prediction"],
+            "evaluation.true_prediction",
+        )
     )
     if neural_prediction.shape != evaluation_grid.shape:
         raise SchemaError("evaluation.neural_prediction must match evaluation.grid.")
-    if true_prediction.shape != evaluation_grid.shape:
+    if true_prediction is not None and true_prediction.shape != evaluation_grid.shape:
         raise SchemaError("evaluation.true_prediction must match evaluation.grid.")
 
     start = time.perf_counter()
@@ -108,37 +112,55 @@ def _run_worker(request_path: Path) -> dict[str, Any]:
         fit_result.regressor,
         evaluation_grid,
     )
-    neural_vs_true = _comparison_metrics(neural_prediction, true_prediction)
     symbolic_vs_neural = _comparison_metrics(symbolic_prediction, neural_prediction)
-    symbolic_vs_true = _comparison_metrics(symbolic_prediction, true_prediction)
-    true_range = float(np.ptp(true_prediction))
-    denominator = true_range if true_range > _NEGLIGIBLE_RANGE else None
-    metrics = SymbolicRecoveryMetrics(
-        evaluation_domain_min=float(evaluation_grid.min()),
-        evaluation_domain_max=float(evaluation_grid.max()),
-        n_evaluation_points=int(evaluation_grid.shape[0]),
-        neural_vs_true_rmse=neural_vs_true[0],
-        neural_vs_true_mae=neural_vs_true[1],
-        symbolic_vs_neural_rmse=symbolic_vs_neural[0],
-        symbolic_vs_neural_mae=symbolic_vs_neural[1],
-        symbolic_vs_true_rmse=symbolic_vs_true[0],
-        symbolic_vs_true_mae=symbolic_vs_true[1],
-        true_reaction_range=true_range,
-        neural_vs_true_normalized_rmse=(
-            neural_vs_true[0] / denominator if denominator is not None else None
-        ),
-        symbolic_vs_neural_normalized_rmse=(
-            symbolic_vs_neural[0] / denominator if denominator is not None else None
-        ),
-        symbolic_vs_true_normalized_rmse=(
-            symbolic_vs_true[0] / denominator if denominator is not None else None
-        ),
-        symbolic_complexity=fit_result.complexity,
-    )
+    metrics: dict[str, Any] = {
+        "evaluation_domain_min": float(evaluation_grid.min()),
+        "evaluation_domain_max": float(evaluation_grid.max()),
+        "n_evaluation_points": int(evaluation_grid.shape[0]),
+        "symbolic_vs_neural_rmse": symbolic_vs_neural[0],
+        "symbolic_vs_neural_mae": symbolic_vs_neural[1],
+        "symbolic_complexity": fit_result.complexity,
+    }
+    if true_prediction is not None:
+        neural_vs_true = _comparison_metrics(neural_prediction, true_prediction)
+        symbolic_vs_true = _comparison_metrics(symbolic_prediction, true_prediction)
+        true_range = float(np.ptp(true_prediction))
+        denominator = true_range if true_range > _NEGLIGIBLE_RANGE else None
+        synthetic_metrics = SymbolicRecoveryMetrics(
+            evaluation_domain_min=float(evaluation_grid.min()),
+            evaluation_domain_max=float(evaluation_grid.max()),
+            n_evaluation_points=int(evaluation_grid.shape[0]),
+            neural_vs_true_rmse=neural_vs_true[0],
+            neural_vs_true_mae=neural_vs_true[1],
+            symbolic_vs_neural_rmse=symbolic_vs_neural[0],
+            symbolic_vs_neural_mae=symbolic_vs_neural[1],
+            symbolic_vs_true_rmse=symbolic_vs_true[0],
+            symbolic_vs_true_mae=symbolic_vs_true[1],
+            true_reaction_range=true_range,
+            neural_vs_true_normalized_rmse=(
+                neural_vs_true[0] / denominator if denominator is not None else None
+            ),
+            symbolic_vs_neural_normalized_rmse=(
+                symbolic_vs_neural[0] / denominator if denominator is not None else None
+            ),
+            symbolic_vs_true_normalized_rmse=(
+                symbolic_vs_true[0] / denominator if denominator is not None else None
+            ),
+            symbolic_complexity=fit_result.complexity,
+        )
+        metrics = synthetic_metrics.__dict__
     interpretation = interpret_symbolic_polynomial(
         fit_result,
-        true_growth_rate=float(evaluation_payload["true_growth_rate"]),
-        true_saturation_rate=float(evaluation_payload["true_saturation_rate"]),
+        true_growth_rate=(
+            None
+            if "true_growth_rate" not in evaluation_payload
+            else float(evaluation_payload["true_growth_rate"])
+        ),
+        true_saturation_rate=(
+            None
+            if "true_saturation_rate" not in evaluation_payload
+            else float(evaluation_payload["true_saturation_rate"])
+        ),
     )
 
     return {
@@ -155,7 +177,7 @@ def _run_worker(request_path: Path) -> dict[str, Any]:
         "runtime_seconds": runtime_seconds,
         "pysr_version": fit_result.pysr_version,
         "julia_version": _julia_version(),
-        "metrics": metrics.__dict__,
+        "metrics": metrics,
         "polynomial_interpretation": interpretation.__dict__,
     }
 
