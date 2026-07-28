@@ -12,11 +12,20 @@ import torch
 
 from tau_sr.neural import NeuralReactionDiffusion
 from tau_sr.pilot_adapter import (
+    DATA_ALIGNMENT_READY,
+    FORMAL_EVALUATION_READY,
+    PILOT_N_LEFT_CORTICAL,
     PILOT_N_REGIONS,
-    ROI_LOOKUP_REQUIRED,
+    PILOT_N_RIGHT_CORTICAL,
+    PILOT_N_SUBCORTICAL,
+    PILOT_SUBCORTICAL_START,
+    ROI_ALIGNMENT_DIRECT,
+    ROI_LABELS_INVALID,
+    UNKNOWN_PROVENANCE,
     LongitudinalTrajectoryDataset,
     inspect_pilot_inputs,
     load_pilot_dataset,
+    make_pilot_roi_labels,
 )
 from tau_sr.recovery import SyntheticRecoveryDataset
 from tau_sr.schemas import SchemaError
@@ -106,29 +115,84 @@ def _fixture(tmp_path: Path) -> tuple[Path, tuple[Path, Path]]:
     return _tau_workbook(tmp_path / "tau.xlsx"), _connectomes(tmp_path)
 
 
-def test_inspect_pilot_inputs_is_privacy_safe_and_blocks_training(tmp_path: Path) -> None:
+def test_make_pilot_roi_labels_uses_confirmed_structural_order() -> None:
+    labels = make_pilot_roi_labels()
+
+    assert len(labels) == PILOT_N_REGIONS
+    assert labels[:PILOT_N_LEFT_CORTICAL] == tuple(
+        f"LH_Destrieux_{index:02d}"
+        for index in range(1, PILOT_N_LEFT_CORTICAL + 1)
+    )
+    assert labels[PILOT_N_LEFT_CORTICAL:PILOT_SUBCORTICAL_START] == tuple(
+        f"RH_Destrieux_{index:02d}"
+        for index in range(1, PILOT_N_RIGHT_CORTICAL + 1)
+    )
+    assert labels[PILOT_SUBCORTICAL_START:] == tuple(
+        f"Subcortical_{index:02d}"
+        for index in range(1, PILOT_N_SUBCORTICAL + 1)
+    )
+    assert PILOT_N_LEFT_CORTICAL + PILOT_N_RIGHT_CORTICAL + PILOT_N_SUBCORTICAL == 160
+    assert sum(label.startswith("Subcortical_") for label in labels) == 12
+    assert "Subcortical_13" not in labels
+
+
+def test_inspect_pilot_inputs_is_privacy_safe_and_reports_readiness(tmp_path: Path) -> None:
     tau, connectomes = _fixture(tmp_path)
 
     summary = inspect_pilot_inputs(tau, connectomes)
 
     assert summary["subject_count"] == 2
+    assert summary["subject_ids"] == ("Pilot Subject 1", "Pilot Subject 2")
     assert summary["visit_counts"] == {"Pilot Subject 1": 2, "Pilot Subject 2": 3}
     assert summary["region_count"] == 160
+    assert summary["roi_alignment"] == ROI_ALIGNMENT_DIRECT
+    assert summary["data_alignment_ready"] is DATA_ALIGNMENT_READY
+    assert summary["formal_evaluation_ready"] is FORMAL_EVALUATION_READY
     assert summary["missing_tau_values"] == 0
+    assert summary["adjacency_shapes"] == (
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+    )
+    assert summary["laplacian_shapes"] == (
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+        (PILOT_N_REGIONS, PILOT_N_REGIONS),
+    )
     assert summary["symmetrization_valid"] is True
-    assert summary["roi_lookup_required"] is True
     text = repr(summary)
     for private in ("SUBJECT_A", "SUBJECT_B", "SCAN_A", "SCAN_B", "10366", str(tau)):
         assert private not in text
 
 
-def test_load_pilot_dataset_requires_ordered_160_roi_labels(tmp_path: Path) -> None:
+def test_load_pilot_dataset_defaults_to_neutral_roi_labels(tmp_path: Path) -> None:
     tau, connectomes = _fixture(tmp_path)
 
-    with pytest.raises(SchemaError, match=ROI_LOOKUP_REQUIRED):
-        load_pilot_dataset(tau, connectomes, roi_labels=None)
-    with pytest.raises(SchemaError, match=ROI_LOOKUP_REQUIRED):
+    dataset = load_pilot_dataset(tau, connectomes)
+
+    assert dataset.roi_labels == make_pilot_roi_labels()
+    assert dataset.roi_alignment == ROI_ALIGNMENT_DIRECT
+    assert dataset.data_alignment_ready is True
+    assert dataset.formal_evaluation_ready is False
+
+
+def test_supplied_roi_labels_change_names_only_and_are_validated(tmp_path: Path) -> None:
+    tau, connectomes = _fixture(tmp_path)
+    default = load_pilot_dataset(tau, connectomes)
+    custom_labels = _roi_labels()
+
+    custom = load_pilot_dataset(tau, connectomes, roi_labels=custom_labels)
+
+    assert custom.roi_labels == custom_labels
+    np.testing.assert_array_equal(custom.adjacencies, default.adjacencies)
+    np.testing.assert_array_equal(custom.laplacians, default.laplacians)
+    for left, right in zip(custom.trajectories, default.trajectories, strict=True):
+        np.testing.assert_array_equal(left, right)
+
+    with pytest.raises(SchemaError, match=ROI_LABELS_INVALID):
         load_pilot_dataset(tau, connectomes, roi_labels=_roi_labels()[:-1])
+    with pytest.raises(SchemaError, match=ROI_LABELS_INVALID):
+        load_pilot_dataset(tau, connectomes, roi_labels=(*_roi_labels()[:-1], "ROI 1"))
+    with pytest.raises(SchemaError, match="nonempty"):
+        load_pilot_dataset(tau, connectomes, roi_labels=(*_roi_labels()[:-1], ""))
 
 
 def test_load_pilot_dataset_sorts_visits_symmetrizes_and_uses_neutral_labels(
@@ -136,18 +200,35 @@ def test_load_pilot_dataset_sorts_visits_symmetrizes_and_uses_neutral_labels(
 ) -> None:
     tau, connectomes = _fixture(tmp_path)
 
-    dataset = load_pilot_dataset(tau, connectomes, roi_labels=_roi_labels())
+    dataset = load_pilot_dataset(tau, connectomes)
 
     assert dataset.subject_ids == ("Pilot Subject 1", "Pilot Subject 2")
+    assert dataset.atlas == "Destrieux cortical plus 12 subcortical regions"
+    assert dataset.roi_alignment == "verified_direct_index"
     assert dataset.tau_measurement == "SUVR"
     assert dataset.tau_reference == "pending_exact_confirmation"
     assert dataset.sc_weight_type == "normalized_fiber_count"
+    assert dataset.sc_static_over_time is True
     assert dataset.laplacian_kind == "symmetric_normalized"
     assert dataset.times_by_subject[0][0] == pytest.approx(0.0)
     assert dataset.times_by_subject[0][1] == pytest.approx(366.0 / 365.25)
-    assert np.array_equal(dataset.adjacencies[0], dataset.adjacencies[0].T)
+    expected_first = 0.5 * (_connectome_matrix() + _connectome_matrix().T)
+    expected_second = 0.5 * ((_connectome_matrix() * 1.1) + (_connectome_matrix() * 1.1).T)
+    np.fill_diagonal(expected_first, 0.0)
+    np.fill_diagonal(expected_second, 0.0)
+    np.testing.assert_allclose(dataset.adjacencies[0], expected_first)
+    np.testing.assert_allclose(dataset.adjacencies[1], expected_second)
+    assert not np.array_equal(dataset.adjacencies[0], dataset.adjacencies[1])
     assert np.array_equal(np.diag(dataset.adjacencies[0]), np.zeros(PILOT_N_REGIONS))
     assert np.min(dataset.adjacencies[0].sum(axis=1)) > 0.0
+    np.testing.assert_allclose(dataset.trajectories[0][0], _node_values(0.0))
+    assert dataset.trajectories[0][0, 0] == pytest.approx(_node_values(0.0)[0])
+    assert dataset.trajectories[0][0, 73] == pytest.approx(_node_values(0.0)[73])
+    assert dataset.trajectories[0][0, 74] == pytest.approx(_node_values(0.0)[74])
+    assert dataset.trajectories[0][0, 147] == pytest.approx(_node_values(0.0)[147])
+    assert dataset.trajectories[0][0, 148] == pytest.approx(_node_values(0.0)[148])
+    assert dataset.trajectories[0][0, 159] == pytest.approx(_node_values(0.0)[159])
+    assert [trajectory.shape[0] for trajectory in dataset.trajectories] == [2, 3]
     with pytest.raises(ValueError):
         dataset.trajectories[0][0, 0] = 9.0
     assert "SUBJECT_A" not in repr(dataset)
@@ -260,6 +341,71 @@ def test_adapter_reuses_existing_laplacian_builder(tmp_path: Path, monkeypatch) 
         ((PILOT_N_REGIONS, PILOT_N_REGIONS), "symmetric_normalized"),
     ]
     np.testing.assert_array_equal(dataset.laplacians[0], np.eye(PILOT_N_REGIONS))
+
+
+def test_generic_dataset_defaults_to_unknown_unready_provenance() -> None:
+    synthetic = _small_synthetic_dataset()
+
+    generic = LongitudinalTrajectoryDataset(
+        subject_ids=synthetic.subject_ids,
+        roi_labels=synthetic.roi_labels,
+        adjacencies=synthetic.adjacencies,
+        laplacians=synthetic.laplacians,
+        times_by_subject=synthetic.times_by_subject,
+        trajectories=synthetic.trajectories,
+    )
+
+    assert generic.atlas == UNKNOWN_PROVENANCE
+    assert generic.roi_alignment == UNKNOWN_PROVENANCE
+    assert generic.tau_measurement == UNKNOWN_PROVENANCE
+    assert generic.tau_reference == UNKNOWN_PROVENANCE
+    assert generic.sc_weight_type == UNKNOWN_PROVENANCE
+    assert generic.sc_static_over_time is False
+    assert generic.laplacian_kind == UNKNOWN_PROVENANCE
+    assert generic.data_alignment_ready is False
+    assert generic.formal_evaluation_ready is False
+
+
+def test_ready_dataset_requires_explicit_provenance() -> None:
+    synthetic = _small_synthetic_dataset()
+
+    with pytest.raises(SchemaError, match="explicit provenance"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            data_alignment_ready=True,
+        )
+
+    with pytest.raises(SchemaError, match="explicit provenance"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            data_alignment_ready=True,
+            formal_evaluation_ready=True,
+        )
+
+
+def test_formal_evaluation_readiness_requires_data_alignment() -> None:
+    synthetic = _small_synthetic_dataset()
+
+    with pytest.raises(SchemaError, match="data_alignment_ready"):
+        LongitudinalTrajectoryDataset(
+            subject_ids=synthetic.subject_ids,
+            roi_labels=synthetic.roi_labels,
+            adjacencies=synthetic.adjacencies,
+            laplacians=synthetic.laplacians,
+            times_by_subject=synthetic.times_by_subject,
+            trajectories=synthetic.trajectories,
+            formal_evaluation_ready=True,
+        )
 
 
 def test_synthetic_and_generic_training_paths_are_equivalent() -> None:

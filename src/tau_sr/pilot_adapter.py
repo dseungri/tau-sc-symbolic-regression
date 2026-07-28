@@ -18,11 +18,34 @@ from tau_sr.graphs import LaplacianKind, build_graph_laplacian
 from tau_sr.schemas import SchemaError
 
 PILOT_N_REGIONS = 160
+PILOT_N_LEFT_CORTICAL = 74
+PILOT_N_RIGHT_CORTICAL = 74
+PILOT_N_SUBCORTICAL = 12
+PILOT_RIGHT_START = 74
+PILOT_SUBCORTICAL_START = 148
+if PILOT_N_LEFT_CORTICAL + PILOT_N_RIGHT_CORTICAL + PILOT_N_SUBCORTICAL != PILOT_N_REGIONS:
+    raise RuntimeError("pilot structural region constants are inconsistent.")
+
+PILOT_ATLAS = "Destrieux cortical plus 12 subcortical regions"
+ROI_ALIGNMENT_DIRECT = "verified_direct_index"
 TAU_MEASUREMENT = "SUVR"
 TAU_REFERENCE_PENDING = "pending_exact_confirmation"
 SC_WEIGHT_TYPE = "normalized_fiber_count"
+SC_STATIC_OVER_TIME = True
+DATA_ALIGNMENT_READY = True
+FORMAL_EVALUATION_READY = False
+UNKNOWN_PROVENANCE = "unknown"
+DEFAULT_DATASET_ATLAS = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_ROI_ALIGNMENT = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_TAU_MEASUREMENT = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_TAU_REFERENCE = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_SC_WEIGHT_TYPE = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_SC_STATIC_OVER_TIME = False
+DEFAULT_DATASET_LAPLACIAN_KIND = UNKNOWN_PROVENANCE
+DEFAULT_DATASET_DATA_ALIGNMENT_READY = False
+DEFAULT_DATASET_FORMAL_EVALUATION_READY = False
 DEFAULT_LAPLACIAN_KIND: LaplacianKind = "symmetric_normalized"
-ROI_LOOKUP_REQUIRED = "An ordered 160-region ROI lookup is required before model training."
+ROI_LABELS_INVALID = "roi_labels must contain exactly 160 unique nonempty labels."
 
 _SUBJECT_COLUMN = "PTID"
 _SCAN_COLUMN = "SCAN"
@@ -35,14 +58,34 @@ _XLSX_NS = {
 
 __all__ = (
     "DEFAULT_LAPLACIAN_KIND",
+    "DEFAULT_DATASET_ATLAS",
+    "DEFAULT_DATASET_DATA_ALIGNMENT_READY",
+    "DEFAULT_DATASET_FORMAL_EVALUATION_READY",
+    "DEFAULT_DATASET_LAPLACIAN_KIND",
+    "DEFAULT_DATASET_ROI_ALIGNMENT",
+    "DEFAULT_DATASET_SC_STATIC_OVER_TIME",
+    "DEFAULT_DATASET_SC_WEIGHT_TYPE",
+    "DEFAULT_DATASET_TAU_MEASUREMENT",
+    "DEFAULT_DATASET_TAU_REFERENCE",
+    "DATA_ALIGNMENT_READY",
+    "FORMAL_EVALUATION_READY",
+    "PILOT_ATLAS",
+    "PILOT_N_LEFT_CORTICAL",
     "PILOT_N_REGIONS",
-    "ROI_LOOKUP_REQUIRED",
+    "PILOT_N_RIGHT_CORTICAL",
+    "PILOT_N_SUBCORTICAL",
+    "PILOT_RIGHT_START",
+    "PILOT_SUBCORTICAL_START",
+    "ROI_ALIGNMENT_DIRECT",
+    "ROI_LABELS_INVALID",
     "SC_WEIGHT_TYPE",
     "TAU_MEASUREMENT",
     "TAU_REFERENCE_PENDING",
+    "UNKNOWN_PROVENANCE",
     "LongitudinalTrajectoryDataset",
     "inspect_pilot_inputs",
     "load_pilot_dataset",
+    "make_pilot_roi_labels",
 )
 
 
@@ -56,10 +99,15 @@ class LongitudinalTrajectoryDataset:
     laplacians: np.ndarray
     times_by_subject: tuple[np.ndarray, ...]
     trajectories: tuple[np.ndarray, ...]
-    tau_measurement: str = TAU_MEASUREMENT
-    tau_reference: str = TAU_REFERENCE_PENDING
-    sc_weight_type: str = SC_WEIGHT_TYPE
-    laplacian_kind: str = DEFAULT_LAPLACIAN_KIND
+    atlas: str = DEFAULT_DATASET_ATLAS
+    roi_alignment: str = DEFAULT_DATASET_ROI_ALIGNMENT
+    tau_measurement: str = DEFAULT_DATASET_TAU_MEASUREMENT
+    tau_reference: str = DEFAULT_DATASET_TAU_REFERENCE
+    sc_weight_type: str = DEFAULT_DATASET_SC_WEIGHT_TYPE
+    sc_static_over_time: bool = DEFAULT_DATASET_SC_STATIC_OVER_TIME
+    laplacian_kind: str = DEFAULT_DATASET_LAPLACIAN_KIND
+    data_alignment_ready: bool = DEFAULT_DATASET_DATA_ALIGNMENT_READY
+    formal_evaluation_ready: bool = DEFAULT_DATASET_FORMAL_EVALUATION_READY
 
     def __post_init__(self) -> None:
         subject_ids = _string_tuple(self.subject_ids, "subject_ids")
@@ -89,6 +137,12 @@ class LongitudinalTrajectoryDataset:
         object.__setattr__(self, "laplacians", laplacians)
         object.__setattr__(self, "times_by_subject", times)
         object.__setattr__(self, "trajectories", trajectories)
+        object.__setattr__(self, "atlas", _nonempty(self.atlas, "atlas"))
+        object.__setattr__(
+            self,
+            "roi_alignment",
+            _nonempty(self.roi_alignment, "roi_alignment"),
+        )
         object.__setattr__(
             self,
             "tau_measurement",
@@ -96,7 +150,23 @@ class LongitudinalTrajectoryDataset:
         )
         object.__setattr__(self, "tau_reference", _nonempty(self.tau_reference, "tau_reference"))
         object.__setattr__(self, "sc_weight_type", _nonempty(self.sc_weight_type, "sc_weight_type"))
+        object.__setattr__(
+            self,
+            "sc_static_over_time",
+            _require_bool(self.sc_static_over_time, "sc_static_over_time"),
+        )
         object.__setattr__(self, "laplacian_kind", _nonempty(self.laplacian_kind, "laplacian_kind"))
+        object.__setattr__(
+            self,
+            "data_alignment_ready",
+            _require_bool(self.data_alignment_ready, "data_alignment_ready"),
+        )
+        object.__setattr__(
+            self,
+            "formal_evaluation_ready",
+            _require_bool(self.formal_evaluation_ready, "formal_evaluation_ready"),
+        )
+        _validate_provenance_readiness(self)
 
     @property
     def baseline_states(self) -> np.ndarray:
@@ -109,6 +179,7 @@ class LongitudinalTrajectoryDataset:
             "LongitudinalTrajectoryDataset("
             f"n_subjects={len(self.subject_ids)}, "
             f"n_regions={len(self.roi_labels)}, "
+            f"roi_alignment={self.roi_alignment!r}, "
             f"tau_measurement={self.tau_measurement!r}, "
             f"laplacian_kind={self.laplacian_kind!r})"
         )
@@ -134,14 +205,14 @@ def load_pilot_dataset(
     tau_workbook_path: str | Path,
     connectome_paths: Sequence[str | Path],
     *,
-    roi_labels: Sequence[str] | None,
+    roi_labels: Sequence[str] | None = None,
     tau_reference: str = TAU_REFERENCE_PENDING,
     laplacian_kind: LaplacianKind = DEFAULT_LAPLACIAN_KIND,
 ) -> LongitudinalTrajectoryDataset:
     """Load pilot files into the generic training contract.
 
-    The ordered 160-label lookup is mandatory; without it, model training stays
-    blocked rather than silently guessing atlas alignment.
+    If exact anatomical names are not supplied, deterministic neutral labels
+    preserve the confirmed Node 1-160 to SC row/column 1-160 alignment.
     """
 
     labels = _validate_roi_labels(roi_labels)
@@ -158,10 +229,15 @@ def load_pilot_dataset(
         laplacians=np.stack([laplacian for _adjacency, laplacian, _stats in connectomes]),
         times_by_subject=tuple(subject.times for subject in tau.subjects),
         trajectories=tuple(subject.trajectory for subject in tau.subjects),
+        atlas=PILOT_ATLAS,
+        roi_alignment=ROI_ALIGNMENT_DIRECT,
         tau_measurement=TAU_MEASUREMENT,
         tau_reference=tau_reference,
         sc_weight_type=SC_WEIGHT_TYPE,
+        sc_static_over_time=SC_STATIC_OVER_TIME,
         laplacian_kind=laplacian_kind,
+        data_alignment_ready=DATA_ALIGNMENT_READY,
+        formal_evaluation_ready=FORMAL_EVALUATION_READY,
     )
 
 
@@ -180,6 +256,7 @@ def inspect_pilot_inputs(
     degrees = [stats["minimum_degree"] for _adjacency, _laplacian, stats in connectomes]
     return {
         "subject_count": len(tau.subjects),
+        "subject_ids": tuple(subject.neutral_id for subject in tau.subjects),
         "visit_counts": {
             subject.neutral_id: int(subject.times.shape[0]) for subject in tau.subjects
         },
@@ -188,14 +265,20 @@ def inspect_pilot_inputs(
             for subject in tau.subjects
         },
         "region_count": tau.n_regions,
+        "atlas": PILOT_ATLAS,
+        "roi_alignment": ROI_ALIGNMENT_DIRECT,
         "missing_tau_values": tau.missing_count,
+        "adjacency_shapes": tuple(adjacency.shape for adjacency, _laplacian, _stats in connectomes),
+        "laplacian_shapes": tuple(laplacian.shape for _adjacency, laplacian, _stats in connectomes),
         "connectome_shapes": tuple((PILOT_N_REGIONS, PILOT_N_REGIONS) for _ in connectomes),
+        "sc_static_over_time": SC_STATIC_OVER_TIME,
         "symmetrization_valid": all(
             bool(stats["symmetrization_valid"])
             for _adjacency, _laplacian, stats in connectomes
         ),
         "minimum_degree": float(min(degrees)),
-        "roi_lookup_required": True,
+        "data_alignment_ready": DATA_ALIGNMENT_READY,
+        "formal_evaluation_ready": FORMAL_EVALUATION_READY,
     }
 
 
@@ -329,11 +412,27 @@ def _load_connectome(
 
 def _validate_roi_labels(labels: Sequence[str] | None) -> tuple[str, ...]:
     if labels is None:
-        raise SchemaError(ROI_LOOKUP_REQUIRED)
+        return make_pilot_roi_labels()
     checked = _string_tuple(labels, "roi_labels")
     if len(checked) != PILOT_N_REGIONS or len(set(checked)) != PILOT_N_REGIONS:
-        raise SchemaError(ROI_LOOKUP_REQUIRED)
+        raise SchemaError(ROI_LABELS_INVALID)
     return checked
+
+
+def make_pilot_roi_labels() -> tuple[str, ...]:
+    labels = [
+        f"LH_Destrieux_{index:02d}"
+        for index in range(1, PILOT_N_LEFT_CORTICAL + 1)
+    ]
+    labels.extend(
+        f"RH_Destrieux_{index:02d}"
+        for index in range(1, PILOT_N_RIGHT_CORTICAL + 1)
+    )
+    labels.extend(
+        f"Subcortical_{index:02d}"
+        for index in range(1, PILOT_N_SUBCORTICAL + 1)
+    )
+    return tuple(labels)
 
 
 def _node_columns(headers: Sequence[str], n_regions: int) -> tuple[str, ...]:
@@ -545,3 +644,26 @@ def _nonempty(value: object, field_name: str) -> str:
     if not text:
         raise SchemaError(f"{field_name} must contain nonempty strings.")
     return text
+
+
+def _require_bool(value: object, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise SchemaError(f"{field_name} must be a boolean.")
+    return value
+
+
+def _validate_provenance_readiness(dataset: LongitudinalTrajectoryDataset) -> None:
+    if dataset.formal_evaluation_ready and not dataset.data_alignment_ready:
+        raise SchemaError("formal_evaluation_ready requires data_alignment_ready.")
+    if not dataset.data_alignment_ready:
+        return
+    required = (
+        dataset.atlas,
+        dataset.roi_alignment,
+        dataset.tau_measurement,
+        dataset.tau_reference,
+        dataset.sc_weight_type,
+        dataset.laplacian_kind,
+    )
+    if any(value == UNKNOWN_PROVENANCE for value in required):
+        raise SchemaError("data_alignment_ready requires explicit provenance fields.")

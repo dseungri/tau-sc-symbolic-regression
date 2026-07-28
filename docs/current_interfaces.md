@@ -371,10 +371,15 @@ class LongitudinalTrajectoryDataset:
     laplacians: np.ndarray
     times_by_subject: tuple[np.ndarray, ...]
     trajectories: tuple[np.ndarray, ...]
-    tau_measurement: str = "SUVR"
-    tau_reference: str = "pending_exact_confirmation"
-    sc_weight_type: str = "normalized_fiber_count"
-    laplacian_kind: str = "symmetric_normalized"
+    atlas: str = "unknown"
+    roi_alignment: str = "unknown"
+    tau_measurement: str = "unknown"
+    tau_reference: str = "unknown"
+    sc_weight_type: str = "unknown"
+    sc_static_over_time: bool = False
+    laplacian_kind: str = "unknown"
+    data_alignment_ready: bool = False
+    formal_evaluation_ready: bool = False
 
     @property
     def baseline_states(self) -> np.ndarray:
@@ -386,26 +391,38 @@ It contains neutral subject labels only, no source identifiers, no scan IDs, no
 exact dates, no demographics, no raw paths, and no synthetic truth fields such as
 true rho or reaction coefficients. Arrays are copied and stored read-only.
 `baseline_states` is derived from the first trajectory row instead of stored as
-duplicated input.
+duplicated input. Direct construction uses conservative `"unknown"` provenance
+and readiness defaults; loaders with verified provenance, such as
+`load_pilot_dataset`, must supply explicit metadata.
 
 ```python
 load_pilot_dataset(
     tau_workbook_path,
     connectome_paths,
     *,
-    roi_labels,
+    roi_labels=None,
     tau_reference="pending_exact_confirmation",
     laplacian_kind="symmetric_normalized",
 ) -> LongitudinalTrajectoryDataset
 ```
 
 The pilot loader expects one local tau workbook, two local headerless numeric SC
-CSV matrices, and an explicit ordered 160-label ROI sequence. The ordered ROI
-labels are mandatory; without them, dataset construction raises:
+CSV matrices, and optionally an explicit ordered 160-label ROI sequence.
+Advisor-confirmed direct index alignment means external labels are not required
+for numerical alignment: tau `Node i` maps directly to SC row `i` and column `i`
+for `i=1..160`. If `roi_labels` is `None`, the adapter uses deterministic
+non-anatomical labels in the original order:
 
 ```text
-An ordered 160-region ROI lookup is required before model training.
+LH_Destrieux_01 ... LH_Destrieux_74
+RH_Destrieux_01 ... RH_Destrieux_74
+Subcortical_01 ... Subcortical_12
 ```
+
+Supplying custom labels changes names only and never reorders tau or SC arrays.
+Supplied labels must be exactly 160 unique nonempty strings. The separate
+333-parcel functional-atlas workbook is not used for this 160-node structural
+pilot; there is no 333-to-160 mapping, aggregation, or reordering step.
 
 The tau workbook is read locally. The loader uses source subject IDs, scan IDs,
 and exact exam dates only transiently for grouping, uniqueness checks, matching,
@@ -429,12 +446,14 @@ The adapter validates finite nonnegative weights, zero raw diagonal, exact
 post-symmetry, zero post-symmetry diagonal, and strictly positive weighted
 degree, then delegates Laplacian construction to `build_graph_laplacian`.
 
-The pilot has 160 nodes. The atlas is described as Destrieux with additional
-subcortical regions; the final 16 labels are intended to be subcortical, but the
-exact ordered lookup remains the training-readiness gate. Two subjects are
-sufficient for file-format validation and an end-to-end pilot adapter smoke
-check, but not for an honest subject-level train/validation/test evaluation. No
-real-data mechanistic or generalization claims should be made at this phase.
+The pilot has 160 nodes in the confirmed structural order: Nodes 1-74 are
+left-hemisphere Destrieux cortical regions, Nodes 75-148 are right-hemisphere
+Destrieux cortical regions, and Nodes 149-160 are 12 subcortical regions. The
+previous 16-subcortical assumption was incorrect. The data alignment status is
+`data_alignment_ready=True`; formal model evaluation remains
+`formal_evaluation_ready=False` because two subjects cannot support an honest
+subject-level train/validation/test evaluation. No real-data mechanistic or
+generalization claims should be made at this phase.
 
 ```python
 inspect_pilot_inputs(
@@ -445,12 +464,12 @@ inspect_pilot_inputs(
 
 This structural inspection helper returns only privacy-safe aggregate metadata:
 neutral subject counts, neutral visit counts, relative elapsed times, node count,
-`missing_tau_values`, SC shapes, symmetrization validity, minimum degree, and
-that the ROI lookup is still required. `missing_tau_values` counts blank,
-missing, or non-finite tau node cells normalized to `NaN` during workbook
-inspection; finite node cells are counted separately internally. The helper does
-not return rows, arrays, identifiers, dates, filenames, paths, demographics, or
-source-to-neutral mappings.
+`missing_tau_values`, adjacency and Laplacian shapes, symmetrization validity,
+minimum degree, direct-alignment status, and readiness flags.
+`missing_tau_values` counts blank, missing, or non-finite tau node cells
+normalized to `NaN` during workbook inspection; finite node cells are counted
+separately internally. The helper does not return rows, arrays, identifiers,
+dates, filenames, paths, demographics, or source-to-neutral mappings.
 
 ### Synthetic Linear-Quadratic Reaction Law
 
