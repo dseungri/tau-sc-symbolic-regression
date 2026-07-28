@@ -236,8 +236,13 @@ def test_load_selected_pilot_training_config_uses_best_epoch_plus_one(
 
 
 def test_validate_private_output_directory_rejects_unignored_repo_directory() -> None:
-    with pytest.raises(SchemaError, match="git-ignored"):
-        pilot.validate_private_output_directory(pilot.REPO_ROOT / "unignored_pilot_outputs")
+    target = pilot.REPO_ROOT / f"unignored_pilot_outputs_{uuid.uuid4().hex}"
+    try:
+        with pytest.raises(SchemaError, match="git-ignored"):
+            pilot.validate_private_output_directory(target)
+    finally:
+        if target.exists():
+            target.rmdir()
 
 
 def test_run_symbolic_distillation_uses_training_domain_and_declared_pysr_config(
