@@ -622,14 +622,21 @@ def validate_private_output_directory(path: str | Path) -> Path:
     output_dir = Path(path).expanduser().resolve()
     if _is_relative_to(output_dir, REPO_ROOT):
         artifact = output_dir / "pilot_experiment_summary.json"
-        ignored = subprocess.run(
-            ["git", "check-ignore", "-q", str(artifact)],
-            cwd=REPO_ROOT,
-            check=False,
-        )
+        try:
+            ignored = subprocess.run(  # noqa: S603, S607 - fixed argv, no shell
+                ["git", "check-ignore", "-q", str(artifact)],
+                cwd=REPO_ROOT,
+                check=False,
+            )
+        except OSError as exc:
+            raise SchemaError(
+                "could not run 'git check-ignore' to confirm the output directory "
+                f"is ignored: {exc}"
+            ) from exc
         if ignored.returncode != 0:
             raise SchemaError("output directory inside the repository must be git-ignored.")
     output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     output_dir.chmod(0o700)
     return output_dir
 
