@@ -471,6 +471,91 @@ normalized to `NaN` during workbook inspection; finite node cells are counted
 separately internally. The helper does not return rows, arrays, identifiers,
 dates, filenames, paths, demographics, or source-to-neutral mappings.
 
+### Full-cohort two-timepoint adapter
+
+Defined in `cohort_adapter.py`
+
+```python
+load_two_timepoint_cohort(
+    structure_dir,
+    baseline_tau_dir,
+    followup_tau_dir,
+    *,
+    laplacian_kind="symmetric_normalized",
+) -> LongitudinalTrajectoryDataset
+
+inspect_two_timepoint_cohort(
+    structure_dir,
+    baseline_tau_dir,
+    followup_tau_dir,
+) -> dict[str, object]
+```
+
+The full-cohort adapter loads one structural-connectivity CSV, one measured
+baseline tau CSV, and one measured one-year follow-up tau CSV per subject. The
+external naming can be misleading; internally these roles are always called
+`structural_connectivity`, `baseline_tau`, and `followup_tau`.
+
+Each structural-connectivity matrix must have shape `(160, 160)`. Each tau file
+must have shape `(160,)`, `(160, 1)`, or `(1, 160)`. Tau values are interpreted
+as SUVR referenced to brainstem, and the two time points are fixed at
+`[0.0, 1.0]` years. The adapter does not threshold, renormalize, impute, or
+reorder arrays.
+
+The full-cohort structural inputs are static whole-brain-normalized
+connectivity weights. SC preprocessing is:
+
+```python
+W = 0.5 * (W_raw + W_raw.T)
+np.fill_diagonal(W, 0.0)
+```
+
+The adapter rejects non-finite values, negative values, invalid shapes, and
+processed matrices with non-finite or non-positive weighted degree. It delegates
+symmetric-normalized Laplacian construction to `build_graph_laplacian` by
+default.
+
+The ROI order is the same 160-node order as the pilot adapter:
+
+```text
+LH_Destrieux_01 ... LH_Destrieux_74
+RH_Destrieux_01 ... RH_Destrieux_74
+Subcortical_01 ... Subcortical_12
+```
+
+CSV triplets are matched one-to-one by a narrow terminal numeric subject token.
+Hidden metadata files are ignored. Duplicate tokens, malformed CSV names, and
+missing counterparts raise `SchemaError`. Public summaries and artifacts report
+aggregate counts only and never include source identifiers, filenames, private
+paths, raw rows, full vectors, exact dates, or source-to-neutral mappings.
+
+```python
+make_frozen_cohort_split(
+    subject_ids,
+    *,
+    seed=42,
+    train_fraction=0.70,
+    validation_fraction=0.10,
+    test_fraction=0.20,
+) -> SubjectSplit
+```
+
+The frozen split is subject-level, deterministic, and does not mutate NumPy's
+global random state. For 160 subjects the split is 112 train, 16 validation, and
+32 test. For 150 subjects the split is 105 train, 15 validation, and 30 test.
+The private split manifest stores only neutral subject labels.
+
+```text
+scripts/prepare_real_cohort.py
+```
+
+The preparation CLI requires explicit input directories, an explicit private
+output directory, and an optional split seed. It runs aggregate QC, stops on
+validation failure, loads the dataset, creates the frozen split, and writes
+privacy-safe JSON artifacts with restrictive permissions. It does not run
+neural training, symbolic regression, Julia, PySR, tuning, model comparison, or
+figure generation.
+
 ### Synthetic Linear-Quadratic Reaction Law
 
 Defined in `reactions.py`
