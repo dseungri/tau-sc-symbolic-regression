@@ -556,6 +556,48 @@ privacy-safe JSON artifacts with restrictive permissions. It does not run
 neural training, symbolic regression, Julia, PySR, tuning, model comparison, or
 figure generation.
 
+### Frozen Full-Cohort Audit
+
+Defined in `cohort_audit.py`
+
+```python
+@dataclass(frozen=True)
+class AuditInputs:
+    frozen_artifact_dir: str | Path
+    audit_output_dir: str | Path
+    structure_dir: str | Path | None = None
+    baseline_tau_dir: str | Path | None = None
+    followup_tau_dir: str | Path | None = None
+    preparation_artifact_dir: str | Path | None = None
+    experiment_commit: str | None = None
+
+audit_frozen_experiment(inputs: AuditInputs) -> dict[str, object]
+```
+
+The audit reads an already completed private full-cohort experiment and writes a
+separate private aggregate audit artifact. It refuses to write inside the
+repository, inside the frozen experiment directory, or over the frozen
+artifacts. Audit output directories are created with mode `0o700`, and JSON
+audit files are written atomically with mode `0o600`.
+
+The audit is read-only with respect to the frozen experiment. It does not train
+models, regenerate predictions, rerun held-out test evaluation, run PySR,
+initialize Julia, change the split, or select new model settings. It verifies
+artifact integrity, split/firewall checks, training semantics, aggregate metric
+reproduction from saved subject-level metrics, subject-paired bootstrap
+comparisons, and aggregate split characterization when the private cohort input
+directories are supplied.
+
+```text
+scripts/audit_cohort_experiment.py
+```
+
+The CLI requires explicit frozen-artifact and private audit-output directories.
+Optional cohort input directories enable aggregate split characterization. CLI
+output is aggregate-only and must not print source identifiers, filenames,
+private paths, split membership lists, subject-level metrics, vectors, matrices,
+predictions, or residual arrays.
+
 ### Synthetic Linear-Quadratic Reaction Law
 
 Defined in `reactions.py`
