@@ -828,7 +828,7 @@ def forecast_neural(
                     dtype=config.dtype,
                 )
                 times = torch.as_tensor(
-                    dataset.times_by_subject[group[0]],
+                    np.asarray(dataset.times_by_subject[group[0]], dtype=float).copy(),
                     device=torch.device(config.device),
                     dtype=config.dtype,
                 )
