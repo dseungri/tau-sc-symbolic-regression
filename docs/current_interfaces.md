@@ -598,6 +598,76 @@ output is aggregate-only and must not print source identifiers, filenames,
 private paths, split membership lists, subject-level metrics, vectors, matrices,
 predictions, or residual arrays.
 
+### Development-Only Full-Cohort Robustness CV
+
+Defined in `cohort_robustness.py`
+
+```python
+@dataclass(frozen=True)
+class RobustnessConfig:
+    outer_folds: int = 5
+    master_seed: int = 42
+    inner_validation_fraction: float = 0.20
+    ridge_alpha_grid: tuple[float, ...] = (
+        1e-4,
+        1e-3,
+        1e-2,
+        1e-1,
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+    )
+    model_config: CohortExperimentConfig = CohortExperimentConfig()
+
+run_development_cross_validation(
+    structure_dir,
+    baseline_tau_dir,
+    followup_tau_dir,
+    preparation_artifact_dir,
+    output_dir,
+    *,
+    config: RobustnessConfig | None = None,
+) -> dict[str, object]
+```
+
+This runner performs deterministic five-fold nested cross-validation on the
+development-only portion of the full cohort. It uses the frozen split manifest
+only to identify and exclude the original held-out test subjects before any
+numerical subject files are opened. The original frozen test subjects must not
+contribute to fold construction, training, inner validation, seed selection,
+ridge-alpha selection, PySR fitting, metrics, figures, or aggregate summaries.
+
+Outer folds are subject-level and deterministic from `master_seed`. Each outer
+evaluation fold is held out from all fitting decisions. Inner training and
+validation splits are deterministic with seed formula:
+
+```text
+master_seed + 1009 * (fold_index + 1)
+```
+
+Models are prespecified as persistence, multivariate ridge, diffusion-only,
+linear reaction-diffusion, linear-quadratic reaction-diffusion, zero-anchored
+neural reaction-diffusion, and symbolic distillation of the refitted neural
+reaction. Ridge uses training-only centering and standardization and selects
+alpha by inner-validation RMSE, breaking exact ties toward larger alpha.
+
+Private outputs include checkpoints, out-of-fold predictions, and residual
+arrays so future audits can reproduce raw-vector metrics. Output directories
+must be outside the repository and use restrictive permissions. Console output
+must be aggregate-only and must not print identifiers, filenames, private paths,
+fold membership, subject-level results, vectors, matrices, predictions, or
+residual arrays.
+
+```text
+scripts/run_cohort_robustness.py
+```
+
+The CLI requires explicit input, preparation-artifact, and private output
+directories. It runs models sequentially, uses safe checkpoint/resume
+fingerprints, and prints only aggregate progress and completion counts.
+
 ### Synthetic Linear-Quadratic Reaction Law
 
 Defined in `reactions.py`
