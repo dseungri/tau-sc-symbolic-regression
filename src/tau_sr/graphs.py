@@ -8,9 +8,19 @@ import numpy as np
 
 from tau_sr.schemas import SchemaError
 
-LaplacianKind = Literal["unnormalized", "symmetric_normalized"]
+LaplacianKind = Literal[
+    "unnormalized",
+    "combinatorial",
+    "symmetric_normalized",
+    "random_walk",
+]
 
-_VALID_LAPLACIAN_KINDS = ("unnormalized", "symmetric_normalized")
+_VALID_LAPLACIAN_KINDS = (
+    "unnormalized",
+    "combinatorial",
+    "symmetric_normalized",
+    "random_walk",
+)
 
 
 def build_graph_laplacian(
@@ -18,15 +28,23 @@ def build_graph_laplacian(
     *,
     kind: LaplacianKind = "unnormalized",
 ) -> np.ndarray:
-    """Build an unnormalized or symmetric normalized graph Laplacian."""
+    """Build a graph Laplacian from an adjacency matrix.
+
+    Every node must have a finite, positive weighted degree before any
+    Laplacian variant is constructed.
+    """
 
     _validate_kind(kind)
     degree = _validate_adjacency(adjacency)
     adjacency_float = adjacency.astype(float, copy=False)
 
-    if kind == "unnormalized":
+    if kind in ("unnormalized", "combinatorial"):
         degree_matrix = np.diag(degree)
         return degree_matrix - adjacency_float
+
+    if kind == "random_walk":
+        inverse_degree = 1.0 / degree
+        return np.eye(adjacency.shape[0], dtype=float) - inverse_degree[:, None] * adjacency_float
 
     inverse_sqrt_degree = 1.0 / np.sqrt(degree)
     normalized_adjacency = (
@@ -40,7 +58,8 @@ def build_graph_laplacian(
 def _validate_kind(kind: object) -> None:
     if kind not in _VALID_LAPLACIAN_KINDS:
         raise SchemaError(
-            "kind must be one of: unnormalized, symmetric_normalized."
+            "kind must be one of: unnormalized, combinatorial, "
+            "symmetric_normalized, random_walk."
         )
 
 

@@ -668,6 +668,68 @@ The CLI requires explicit input, preparation-artifact, and private output
 directories. It runs models sequentially, uses safe checkpoint/resume
 fingerprints, and prints only aggregate progress and completion counts.
 
+### Controlled Synthetic Robustness Sweep
+
+Defined in `synthetic_robustness.py`
+
+```python
+@dataclass(frozen=True)
+class SyntheticRobustnessConfig:
+    n_subjects: int = 24
+    n_regions: int = 148
+    times: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0)
+    true_rho: float = 0.1
+    true_growth_rate: float = 0.5
+    true_saturation_rate: float = 0.5
+    hidden_width: int = 16
+    initial_rho: float = 0.05
+    learning_rate: float = 1e-3
+    rho_learning_rate: float | None = 1e-2
+    max_epochs: int = 1000
+    patience: int = 100
+    pysr_n_samples: int = 500
+    reference_domain: tuple[float, float] = (0.05, 0.627)
+
+build_sweep_manifest() -> tuple[SweepCondition, ...]
+
+run_synthetic_robustness_sweep(
+    results_dir="results/synthetic_robustness",
+    publication_dir="docs/spie/synthetic_robustness",
+    *,
+    config: SyntheticRobustnessConfig | None = None,
+) -> dict[str, object]
+```
+
+The manifest contains exactly 23 one-factor-at-a-time synthetic runs: five
+master-seed runs, nine additional observation-noise runs, three binary-graph
+runs, and six alternative-Laplacian runs. It does not test higher-order
+interactions. Within a master seed, paired conditions reuse the same weighted
+graph generation stream, clean initial states, subject split, true reaction,
+true rho, and base standard-normal noise draw.
+
+The canonical branch artifact records the successful seed-42 zero-anchored
+joint-rho path with `rho_learning_rate=0.01`, `max_epochs=1000`, and
+`patience=100`. The sweep preserves that reconstructable repository path and
+checks the seed-42 weighted symmetric-normalized zero-noise run against the
+previously reported approximate canonical values before accepting aggregate
+results.
+
+Detailed resumable checkpoints and PySR side artifacts are written under the
+ignored `results/synthetic_robustness/` tree. Publication-safe synthetic
+aggregate artifacts are written under `docs/spie/synthetic_robustness/`,
+including JSON, CSV, LaTeX, Markdown, and figure exports. This phase is
+synthetic-only and must not import or read real cohort adapters, private cohort
+directories, patient files, or frozen real-data metrics.
+
+```text
+scripts/run_synthetic_robustness.py
+```
+
+The CLI runs conditions sequentially and prints concise synthetic progress such
+as completed run count and estimated remaining time. `--smoke` runs one tiny
+synthetic condition only to verify plumbing; smoke output is not scientific
+evidence.
+
 ### Synthetic Linear-Quadratic Reaction Law
 
 Defined in `reactions.py`

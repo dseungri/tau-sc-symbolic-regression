@@ -1,0 +1,260 @@
+{
+  "conditions": [
+    {
+      "factor": "seed",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "master_seed_40",
+      "master_seed": 40,
+      "noise_fraction": 0.0,
+      "run_id": "seed_master_40"
+    },
+    {
+      "factor": "seed",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "master_seed_41",
+      "master_seed": 41,
+      "noise_fraction": 0.0,
+      "run_id": "seed_master_41"
+    },
+    {
+      "factor": "seed",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "master_seed_42",
+      "master_seed": 42,
+      "noise_fraction": 0.0,
+      "run_id": "seed_master_42"
+    },
+    {
+      "factor": "seed",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "master_seed_43",
+      "master_seed": 43,
+      "noise_fraction": 0.0,
+      "run_id": "seed_master_43"
+    },
+    {
+      "factor": "seed",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "master_seed_44",
+      "master_seed": 44,
+      "noise_fraction": 0.0,
+      "run_id": "seed_master_44"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.01",
+      "master_seed": 41,
+      "noise_fraction": 0.01,
+      "run_id": "noise_0p01_seed_41"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.05",
+      "master_seed": 41,
+      "noise_fraction": 0.05,
+      "run_id": "noise_0p05_seed_41"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.1",
+      "master_seed": 41,
+      "noise_fraction": 0.1,
+      "run_id": "noise_0p1_seed_41"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.01",
+      "master_seed": 42,
+      "noise_fraction": 0.01,
+      "run_id": "noise_0p01_seed_42"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.05",
+      "master_seed": 42,
+      "noise_fraction": 0.05,
+      "run_id": "noise_0p05_seed_42"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.1",
+      "master_seed": 42,
+      "noise_fraction": 0.1,
+      "run_id": "noise_0p1_seed_42"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.01",
+      "master_seed": 43,
+      "noise_fraction": 0.01,
+      "run_id": "noise_0p01_seed_43"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.05",
+      "master_seed": 43,
+      "noise_fraction": 0.05,
+      "run_id": "noise_0p05_seed_43"
+    },
+    {
+      "factor": "noise",
+      "graph_representation": "count",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "noise_0.1",
+      "master_seed": 43,
+      "noise_fraction": 0.1,
+      "run_id": "noise_0p1_seed_43"
+    },
+    {
+      "factor": "graph_representation",
+      "graph_representation": "binary",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "binary",
+      "master_seed": 41,
+      "noise_fraction": 0.0,
+      "run_id": "graph_binary_seed_41"
+    },
+    {
+      "factor": "graph_representation",
+      "graph_representation": "binary",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "binary",
+      "master_seed": 42,
+      "noise_fraction": 0.0,
+      "run_id": "graph_binary_seed_42"
+    },
+    {
+      "factor": "graph_representation",
+      "graph_representation": "binary",
+      "laplacian_kind": "symmetric_normalized",
+      "level": "binary",
+      "master_seed": 43,
+      "noise_fraction": 0.0,
+      "run_id": "graph_binary_seed_43"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "random_walk",
+      "level": "random_walk",
+      "master_seed": 41,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_random_walk_seed_41"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "combinatorial",
+      "level": "combinatorial",
+      "master_seed": 41,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_combinatorial_seed_41"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "random_walk",
+      "level": "random_walk",
+      "master_seed": 42,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_random_walk_seed_42"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "combinatorial",
+      "level": "combinatorial",
+      "master_seed": 42,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_combinatorial_seed_42"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "random_walk",
+      "level": "random_walk",
+      "master_seed": 43,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_random_walk_seed_43"
+    },
+    {
+      "factor": "laplacian",
+      "graph_representation": "count",
+      "laplacian_kind": "combinatorial",
+      "level": "combinatorial",
+      "master_seed": 43,
+      "noise_fraction": 0.0,
+      "run_id": "laplacian_combinatorial_seed_43"
+    }
+  ],
+  "configuration": {
+    "baseline_tau_max": 0.4,
+    "baseline_tau_min": 0.05,
+    "device": "cpu",
+    "dtype": "torch.float64",
+    "edge_probability": 0.08,
+    "hidden_width": 16,
+    "initial_rho": 0.05,
+    "learning_rate": 0.001,
+    "max_epochs": 1000,
+    "max_step": 0.05,
+    "min_delta": 1e-07,
+    "n_regions": 148,
+    "n_subjects": 24,
+    "patience": 100,
+    "pysr_maxsize": 15,
+    "pysr_n_samples": 500,
+    "pysr_niterations": 100,
+    "pysr_population_size": 33,
+    "pysr_populations": 15,
+    "pysr_worker_shutdown_grace_seconds": 10.0,
+    "pysr_worker_timeout_seconds": 1200.0,
+    "reference_domain": [
+      0.05,
+      0.627
+    ],
+    "reference_grid_points": 1000,
+    "require_canonical_reproduction": true,
+    "rho_learning_rate": 0.01,
+    "test_fraction": 0.16666666666666666,
+    "times": [
+      0.0,
+      0.5,
+      1.0,
+      1.5,
+      2.0
+    ],
+    "true_growth_rate": 0.5,
+    "true_rho": 0.1,
+    "true_saturation_rate": 0.5,
+    "validation_fraction": 0.16666666666666666,
+    "weight_decay": 0.0
+  },
+  "derived_seed_formula": "component_seed = master_seed",
+  "experiment": "controlled_synthetic_robustness_sweep",
+  "interactions_tested": false,
+  "one_factor_at_a_time": true,
+  "repository_commit": "92563a387e3d2c9f8dad5bbd06b5d2268229b18a",
+  "run_count": 23
+}
