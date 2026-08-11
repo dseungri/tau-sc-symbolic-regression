@@ -66,6 +66,27 @@ def test_build_graph_laplacian_symmetric_normalized_small_example() -> None:
     np.testing.assert_allclose(np.diag(laplacian), np.ones(3))
 
 
+def test_build_graph_laplacian_random_walk_small_example() -> None:
+    adjacency = _small_adjacency()
+    degree = adjacency.sum(axis=1)
+    expected = np.eye(3) - adjacency / degree[:, None]
+
+    laplacian = build_graph_laplacian(adjacency, kind="random_walk")
+
+    np.testing.assert_allclose(laplacian, expected)
+    np.testing.assert_allclose(laplacian @ np.ones(3), np.zeros(3), atol=1e-12)
+    np.testing.assert_allclose(np.diag(laplacian), np.ones(3))
+
+
+def test_build_graph_laplacian_combinatorial_aliases_unnormalized() -> None:
+    adjacency = _small_adjacency()
+
+    np.testing.assert_allclose(
+        build_graph_laplacian(adjacency, kind="combinatorial"),
+        build_graph_laplacian(adjacency, kind="unnormalized"),
+    )
+
+
 def test_build_graph_laplacian_defaults_to_unnormalized() -> None:
     adjacency = _small_adjacency()
 
@@ -79,28 +100,37 @@ def test_build_graph_laplacian_standard_synthetic_representations() -> None:
     representations = _synthetic_representations()
 
     for adjacency in representations.values():
-        for kind in ("unnormalized", "symmetric_normalized"):
+        for kind in ("unnormalized", "combinatorial", "symmetric_normalized", "random_walk"):
             laplacian = build_graph_laplacian(adjacency, kind=kind)
 
             assert laplacian.shape == (148, 148)
             assert np.issubdtype(laplacian.dtype, np.floating)
             assert np.isfinite(laplacian).all()
-            assert np.allclose(laplacian, laplacian.T)
             assert not np.shares_memory(laplacian, adjacency)
             assert np.all(np.diag(laplacian) >= 0.0)
             assert np.all(_off_diagonal_values(laplacian) <= 1e-12)
 
-            if kind == "unnormalized":
+            if kind in ("unnormalized", "combinatorial"):
+                assert np.allclose(laplacian, laplacian.T)
                 np.testing.assert_allclose(
                     laplacian.sum(axis=1),
                     0.0,
                     rtol=1e-7,
                     atol=1e-10,
                 )
-            else:
+            elif kind == "symmetric_normalized":
+                assert np.allclose(laplacian, laplacian.T)
                 degree = adjacency.sum(axis=1)
                 np.testing.assert_allclose(
                     laplacian @ np.sqrt(degree),
+                    0.0,
+                    rtol=1e-7,
+                    atol=1e-10,
+                )
+                np.testing.assert_allclose(np.diag(laplacian), np.ones(148))
+            else:
+                np.testing.assert_allclose(
+                    laplacian.sum(axis=1),
                     0.0,
                     rtol=1e-7,
                     atol=1e-10,
@@ -111,7 +141,7 @@ def test_build_graph_laplacian_standard_synthetic_representations() -> None:
 def test_build_graph_laplacian_positive_semidefinite_behavior() -> None:
     adjacency = generate_count_connectome(12, np.random.default_rng(42))
 
-    for kind in ("unnormalized", "symmetric_normalized"):
+    for kind in ("unnormalized", "combinatorial", "symmetric_normalized"):
         laplacian = build_graph_laplacian(adjacency, kind=kind)
         eigenvalues = np.linalg.eigvalsh(laplacian)
 
@@ -123,11 +153,15 @@ def test_build_graph_laplacian_positive_semidefinite_behavior() -> None:
 def test_build_graph_laplacian_connected_synthetic_graph_has_zero_eigenvalue() -> None:
     adjacency = generate_count_connectome(12, np.random.default_rng(42))
 
-    for kind in ("unnormalized", "symmetric_normalized"):
+    for kind in ("unnormalized", "combinatorial", "symmetric_normalized"):
         laplacian = build_graph_laplacian(adjacency, kind=kind)
         eigenvalues = np.linalg.eigvalsh(laplacian)
 
         assert abs(eigenvalues[0]) <= 1e-10
+
+    random_walk = build_graph_laplacian(adjacency, kind="random_walk")
+    eigenvalues = np.linalg.eigvals(random_walk)
+    assert np.min(np.abs(eigenvalues)) <= 1e-10
 
 
 def test_build_graph_laplacian_scaling_behavior() -> None:
@@ -139,15 +173,23 @@ def test_build_graph_laplacian_scaling_behavior() -> None:
         scale * build_graph_laplacian(adjacency, kind="unnormalized"),
     )
     np.testing.assert_allclose(
+        build_graph_laplacian(scale * adjacency, kind="combinatorial"),
+        scale * build_graph_laplacian(adjacency, kind="combinatorial"),
+    )
+    np.testing.assert_allclose(
         build_graph_laplacian(scale * adjacency, kind="symmetric_normalized"),
         build_graph_laplacian(adjacency, kind="symmetric_normalized"),
+    )
+    np.testing.assert_allclose(
+        build_graph_laplacian(scale * adjacency, kind="random_walk"),
+        build_graph_laplacian(adjacency, kind="random_walk"),
     )
 
 
 def test_build_graph_laplacian_preserves_input_and_allocates_output() -> None:
     adjacency = _small_adjacency()
 
-    for kind in ("unnormalized", "symmetric_normalized"):
+    for kind in ("unnormalized", "combinatorial", "symmetric_normalized", "random_walk"):
         adjacency_before = adjacency.copy()
         laplacian = build_graph_laplacian(adjacency, kind=kind)
 

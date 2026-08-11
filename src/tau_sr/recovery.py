@@ -30,7 +30,9 @@ SUPPORTED_CONNECTOME_REPRESENTATIONS: tuple[str, ...] = (
 )
 SUPPORTED_LAPLACIAN_KINDS: tuple[str, ...] = (
     "unnormalized",
+    "combinatorial",
     "symmetric_normalized",
+    "random_walk",
 )
 
 

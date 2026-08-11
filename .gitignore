@@ -29,6 +29,8 @@ logs/**
 !logs/
 !logs/README.md
 !logs/.gitkeep
+results/synthetic_robustness/**
+results/synthetic_robustness_smoke*/**
 results/**/*.csv
 results/**/*.json
 results/**/*.png
@@ -93,4 +95,3 @@ juliaup/
 *token*
 configs/*local*.yaml
 configs/*override*.yaml
-
