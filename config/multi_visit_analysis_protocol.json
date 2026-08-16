@@ -1,0 +1,96 @@
+{
+  "analysis_name": "multi_visit_longitudinal_tau_reaction_diffusion",
+  "configuration": {
+    "bootstrap_resamples": 10000,
+    "bootstrap_seed": 42,
+    "fold_seed": 42,
+    "inner_validation_fraction": 0.2,
+    "neural_device": "cpu",
+    "neural_dtype": "float64",
+    "neural_initial_rho": 0.05,
+    "neural_learning_rate": 0.001,
+    "neural_seeds": [
+      41,
+      42,
+      43
+    ],
+    "neural_width": 16,
+    "outer_folds": 5,
+    "parametric_learning_rate": 0.01,
+    "parametric_max_epochs": 1000,
+    "parametric_optimizer": "Adam",
+    "parametric_patience": 100,
+    "pysr_binary_operators": [
+      "+",
+      "-",
+      "*"
+    ],
+    "pysr_deterministic_serial": true,
+    "pysr_maxsize": 15,
+    "pysr_seed": 42,
+    "pysr_unary_operators": [],
+    "reaction_samples": 500,
+    "rk4_max_step_years": 0.05
+  },
+  "data_handling": {
+    "primary_laplacian": "symmetric_normalized",
+    "preserve_positive_connections_without_thresholding": true,
+    "set_sc_diagonal_to_zero": true,
+    "sort_visits_by_elapsed_time": true,
+    "structural_connectivity_static_over_visits": true,
+    "symmetrize_sc": "(W + W.T) / 2",
+    "threshold_positive_connections": false,
+    "use_actual_elapsed_years": true,
+    "use_neutral_internal_participant_labels": true
+  },
+  "eligibility": {
+    "finite_sc_tau_and_time_values": true,
+    "minimum_valid_tau_pet_observations": 3,
+    "n_regions": 160,
+    "no_zero_degree_graph_nodes_after_preprocessing": true,
+    "one_static_structural_connectivity_matrix": true,
+    "strictly_increasing_elapsed_years": true
+  },
+  "interpretation": {
+    "exploratory_participant_range": [
+      15,
+      29
+    ],
+    "lower_point_estimate_alone_is_not_improvement": true,
+    "minimum_participants_for_non_feasibility": 15,
+    "negative_difference_favors_first_model": true,
+    "software_must_not_upgrade_claim_strength": true
+  },
+  "metrics": [
+    "final_visit_aggregate_rmse",
+    "final_visit_aggregate_mae",
+    "participant_level_rmse",
+    "participant_level_mae",
+    "paired_participant_bootstrap_rmse_mae",
+    "numerical_instability_counts",
+    "fold_level_rho_and_reaction_coefficients",
+    "neural_seed_sensitivity",
+    "symbolic_equation_complexity_loss_coefficients_structure",
+    "symbolic_vs_neural_reaction_rmse_mae"
+  ],
+  "models": [
+    "persistence",
+    "linear_extrapolation",
+    "diffusion",
+    "linear",
+    "quadratic",
+    "neural",
+    "symbolic"
+  ],
+  "no_real_data_run_this_phase": true,
+  "primary_comparison": "quadratic_minus_linear",
+  "schema_version": "tau_sr_multi_visit_analysis_protocol_v1",
+  "secondary_comparisons": [
+    "linear_minus_persistence",
+    "quadratic_minus_persistence",
+    "neural_minus_linear",
+    "neural_minus_quadratic",
+    "symbolic_minus_neural"
+  ],
+  "status": "pre_data_frozen_protocol"
+}

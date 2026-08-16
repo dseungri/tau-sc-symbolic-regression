@@ -1352,3 +1352,201 @@ quadratic ~= -b
 
 Coefficient errors are calculated only when requested true coefficients are
 there and extraction succeeds
+
+## Multi-Visit Longitudinal Analysis Infrastructure
+
+Defined in `multi_visit.py`
+
+This is pre-data infrastructure for a future cohort with at least three tau PET
+observations per participant. No real-data run occurred during this phase. The
+existing frozen 163-participant two-timepoint experiment and its artifacts are
+not modified or rerun by these interfaces.
+
+### Frozen Protocol
+
+Human-readable protocol:
+
+```text
+docs/multi_visit_analysis_protocol.md
+```
+
+Machine-enforceable companion:
+
+```text
+config/multi_visit_analysis_protocol.json
+```
+
+The JSON is validated against the in-code frozen settings by:
+
+```python
+validate_multi_visit_protocol(
+    markdown_path="docs/multi_visit_analysis_protocol.md",
+    json_path="config/multi_visit_analysis_protocol.json",
+)
+```
+
+The protocol hash used by private analysis-freeze artifacts is:
+
+```python
+compute_protocol_hash("config/multi_visit_analysis_protocol.json")
+```
+
+### Manifest Schema
+
+The private manifest is JSON and must not be tracked. It maps neutral internal
+participant labels to one static structural-connectivity CSV and at least three
+tau-visit CSV files with elapsed-year values:
+
+```json
+{
+  "schema_version": "tau_sr_multi_visit_manifest_v1",
+  "n_regions": 160,
+  "roi_labels": ["Region 001", "..."],
+  "metadata": {
+    "atlas": "<atlas name>",
+    "roi_alignment": "<alignment statement>",
+    "tau_measurement": "SUVR",
+    "tau_reference": "<reference region>",
+    "sc_weight_type": "<SC weight definition>",
+    "sc_static_over_time": true,
+    "data_alignment_ready": true
+  },
+  "participants": [
+    {
+      "participant_label": "Participant 001",
+      "sc_file": "<relative-or-absolute-private-sc-csv>",
+      "visits": [
+        {"tau_file": "<relative-or-absolute-private-tau-csv>", "elapsed_years": 0.0},
+        {"tau_file": "<relative-or-absolute-private-tau-csv>", "elapsed_years": 1.2},
+        {"tau_file": "<relative-or-absolute-private-tau-csv>", "elapsed_years": 2.4}
+      ]
+    }
+  ]
+}
+```
+
+Tau CSV files may be numeric 160-vectors in manifest ROI order or labeled CSVs
+with `roi_label,tau_value` columns. Labeled files are checked exactly against
+the manifest ROI order. Aggregate summaries do not include original filenames,
+source identifiers, private paths, exact dates, raw vectors, predictions, or
+residuals.
+
+### Multi-Visit Loader
+
+```python
+load_multi_visit_manifest(
+    manifest_path,
+    *,
+    laplacian_kind="symmetric_normalized",
+) -> MultiVisitLoadResult
+
+load_multi_visit_cohort(
+    manifest_path,
+    *,
+    laplacian_kind="symmetric_normalized",
+) -> LongitudinalTrajectoryDataset
+
+inspect_multi_visit_manifest(manifest_path) -> dict
+```
+
+Validation enforces at least three visits, 160 regions, one SC matrix per
+participant, finite tau/SC/time values, nonnegative tau and SC values,
+strictly increasing elapsed years after sorting, static SC over visits,
+symmetrization by `(W + W.T) / 2`, zero SC diagonal, no thresholding of
+positive normalized connections, and finite positive weighted degree at every
+node before the symmetric-normalized Laplacian is constructed.
+
+The returned dataset reuses `LongitudinalTrajectoryDataset`, with unequal visit
+counts represented by per-subject trajectory arrays and per-subject elapsed-time
+arrays.
+
+### Leakage-Safe Scaffolding
+
+```python
+make_multi_visit_outer_folds(subject_ids, n_folds=5, seed=42)
+forecast_prior_visit_persistence(dataset, subject_indices)
+forecast_linear_extrapolation(dataset, subject_indices)
+evaluate_final_visit_forecasts(dataset, subject_indices, forecasts)
+paired_participant_bootstrap(first_residuals, second_residuals, n_resamples=10000, seed=42)
+```
+
+Outer folds are deterministic, subject-level, and non-overlapping. Outer-test
+participants do not enter fitting or inner validation. Final-visit evaluation
+uses only the penultimate state, actual elapsed horizon, static SC, and earlier
+permissible observations.
+
+The analysis-freeze scaffold is:
+
+```python
+build_multi_visit_analysis_freeze(dataset, folds)
+verify_analysis_freeze_protocol(freeze_payload)
+```
+
+The freeze payload contains the protocol hash, git commit, cohort fingerprint,
+model settings, neutral split assignments, fold-generation seed, metric
+definitions, bootstrap settings, software versions, and a flag stating that test
+outcomes have not been inspected.
+
+### Private Artifacts and Resume Behavior
+
+```python
+prepare_private_multi_visit_output_dir(output_dir)
+write_private_multi_visit_json(path, payload)
+```
+
+Private output directories must be outside the repository and are created with
+mode `0o700`. Private JSON artifacts are written atomically with mode `0o600`.
+Completed artifacts are not silently overwritten; a completed fold checkpoint is
+reused by the synthetic rehearsal.
+
+Aggregate private artifact schema names:
+
+```text
+tau_sr_multi_visit_analysis_freeze_v1
+tau_sr_multi_visit_synthetic_rehearsal_v1
+```
+
+### Command Templates
+
+Private preparation template:
+
+```bash
+python scripts/prepare_multi_visit_cohort.py \
+  --manifest <PRIVATE_MULTI_VISIT_MANIFEST_JSON> \
+  --output-dir <PRIVATE_PREPARATION_OUTPUT_DIR>
+```
+
+Freeze-only future experiment scaffold:
+
+```bash
+python scripts/run_multi_visit_experiment.py \
+  --manifest <PRIVATE_MULTI_VISIT_MANIFEST_JSON> \
+  --output-dir <PRIVATE_EXPERIMENT_OUTPUT_DIR> \
+  --freeze-only
+```
+
+Synthetic-only rehearsal:
+
+```bash
+python scripts/run_multi_visit_rehearsal.py \
+  --output-dir <PRIVATE_TEMP_REHEARSAL_OUTPUT_DIR>
+```
+
+The freeze-only command validates the protocol, manifest, output directory, QC,
+and fold assignments, then writes `analysis_freeze.json`. It does not fit models
+or evaluate final visits in this pre-data phase.
+
+### Reporting Scaffolds
+
+Privacy-safe aggregate utilities are available for future artifact-only
+reporting:
+
+```python
+model_comparison_figure_data(metrics_by_model)
+make_rmse_mae_table(metrics_by_model)
+cohort_visit_count_summary(dataset)
+symbolic_structure_stability_summary(rows)
+```
+
+These utilities accept aggregate inputs only and are tested with controlled
+synthetic fixtures. They do not generate or commit research figures.
