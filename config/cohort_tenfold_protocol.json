@@ -1,0 +1,136 @@
+{
+  "analysis": "full_cohort_nested_tenfold_cv",
+  "branch": "full_cohort_tenfold_cv",
+  "cohort_contract": {
+    "participant_count": 163,
+    "regions": 160,
+    "time_years": [
+      0.0,
+      1.0
+    ],
+    "inputs_per_participant": {
+      "baseline_tau_vectors": 1,
+      "followup_tau_vectors": 1,
+      "static_structural_connectivity_matrices": 1
+    },
+    "laplacian_kind": "symmetric_normalized",
+    "tau_reference": "brainstem",
+    "structural_connectivity_weight": "whole-brain-normalized fiber count"
+  },
+  "outer_fold_design": {
+    "folds": 10,
+    "seed": 42,
+    "method": "seeded permutation followed by numpy.array_split",
+    "allowable_fold_sizes": [
+      16,
+      17
+    ],
+    "required_size_distribution": {
+      "16": 7,
+      "17": 3
+    }
+  },
+  "inner_selection": {
+    "validation_fraction": 0.2,
+    "seed_formula": "master_seed + 1009 * (fold_index + 1)",
+    "selection_metric": "inner_validation_rmse",
+    "refit_rule": "refit selected configuration on all outer-development participants for best_epoch + 1 optimizer updates"
+  },
+  "models": [
+    "persistence",
+    "ridge",
+    "diffusion",
+    "linear",
+    "quadratic",
+    "neural",
+    "symbolic"
+  ],
+  "ridge": {
+    "alpha_grid": [
+      0.0001,
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0,
+      100.0,
+      1000.0,
+      10000.0
+    ]
+  },
+  "neural": {
+    "hidden_width": 16,
+    "initial_rho": 0.05,
+    "learning_rate": 0.001,
+    "max_epochs": 1000,
+    "patience": 100,
+    "min_delta": 1e-07,
+    "max_step": 0.05,
+    "seeds": [
+      41,
+      42,
+      43
+    ],
+    "dtype": "torch.float64",
+    "device": "cpu"
+  },
+  "parametric": {
+    "initial_rho": 0.05,
+    "learning_rate": 0.01,
+    "rho_constraint": "softplus_nonnegative",
+    "reaction_laws": {
+      "diffusion": "r(y) = 0",
+      "linear": "r(y) = a*y",
+      "quadratic": "r(y) = a*y + b*y^2"
+    }
+  },
+  "symbolic": {
+    "samples": 500,
+    "binary_operators": [
+      "+",
+      "-",
+      "*"
+    ],
+    "unary_operators": [],
+    "model_selection": "best",
+    "niterations": 100,
+    "populations": 15,
+    "population_size": 33,
+    "maxsize": 15,
+    "seed": 42,
+    "fit_domain": "outer-development trajectories only"
+  },
+  "metrics": {
+    "residual": "predicted - observed",
+    "mse": "mean(residual^2)",
+    "rmse": "sqrt(mse)",
+    "mae": "mean(abs(residual))",
+    "bias": "mean(residual)",
+    "residual_variance": "mean((residual - bias)^2)",
+    "r_squared": "1 - SSE/SST; secondary descriptive only"
+  },
+  "primary_comparison": "quadratic_vs_linear",
+  "secondary_comparisons": [
+    "linear_vs_persistence",
+    "quadratic_vs_persistence",
+    "diffusion_vs_persistence",
+    "ridge_vs_persistence",
+    "neural_vs_linear",
+    "neural_vs_quadratic",
+    "symbolic_vs_neural",
+    "symbolic_vs_linear"
+  ],
+  "bootstrap": {
+    "level": "participant",
+    "resamples": 10000,
+    "seed": 42,
+    "interval": 0.95
+  },
+  "privacy": {
+    "private_output_mode": "0700",
+    "private_file_mode": "0600",
+    "repository_result_artifacts": false,
+    "console_fold_membership": false,
+    "prior_outcome_artifacts_read": false
+  }
+}
