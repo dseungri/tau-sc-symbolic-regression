@@ -685,6 +685,7 @@ class TenfoldConfig:
 freeze_tenfold_protocol(...) -> dict[str, object]
 execute_tenfold_analysis(...) -> dict[str, object]
 audit_tenfold_experiment(output_dir) -> dict[str, object]
+generate_tenfold_report(output_dir, *, publication_dir=None) -> dict[str, object]
 ```
 
 This runner is isolated from the previous held-out and development-only
@@ -702,12 +703,18 @@ then evaluated once on the outer fold.
 
 Private fold artifacts include prediction, target, and residual arrays so the
 audit can recompute MSE, RMSE, MAE, bias, residual variance, secondary
-descriptive R-squared, and participant-level paired bootstrap intervals without
-training models, running PySR, or opening raw cohort files.
+descriptive R-squared, model-level RMSE/MAE bootstrap intervals, and
+participant-level paired bootstrap intervals without training models, running
+PySR, or opening raw cohort files.
+
+The reporting layer requires a passed independent audit before writing aggregate
+figures or tables. It refuses incomplete or unaudited experiments and does not
+plot participant-level points.
 
 ```text
 scripts/run_cohort_tenfold.py
 scripts/audit_cohort_tenfold.py
+scripts/report_cohort_tenfold.py
 config/cohort_tenfold_protocol.json
 docs/cohort_tenfold_protocol.md
 ```

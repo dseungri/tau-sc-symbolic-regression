@@ -124,7 +124,25 @@
     "level": "participant",
     "resamples": 10000,
     "seed": 42,
-    "interval": 0.95
+    "interval": 0.95,
+    "model_metric_intervals": [
+      "rmse",
+      "mae"
+    ]
+  },
+  "reporting": {
+    "requires_passed_independent_audit": true,
+    "figures": [
+      "model_comparison",
+      "paired_difference_forest",
+      "fold_stability",
+      "parameter_stability",
+      "symbolic_stability"
+    ],
+    "formats": [
+      "pdf",
+      "png_300dpi"
+    ]
   },
   "privacy": {
     "private_output_mode": "0700",

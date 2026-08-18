@@ -18,11 +18,13 @@ from tau_sr.cohort_tenfold import (
     freeze_tenfold_protocol,
     inner_train_validation_split,
     make_tenfold_fold_plan,
+    model_metric_bootstrap,
     overall_prediction_metrics,
     paired_subject_bootstrap,
     refit_updates_from_best_epoch,
 )
 from tau_sr.pilot_adapter import LongitudinalTrajectoryDataset
+from tau_sr.pysr_lifecycle import sha256_file
 from tau_sr.schemas import SchemaError
 from tau_sr.training import SubjectSplit
 
@@ -141,6 +143,9 @@ def test_metrics_formulas_include_variance_and_secondary_r_squared() -> None:
     assert metrics["mae"] == pytest.approx(1.0)
     assert metrics["bias"] == pytest.approx(0.5)
     assert metrics["residual_variance"] == pytest.approx(np.mean((residuals - 0.5) ** 2))
+    assert metrics["mse"] == pytest.approx(
+        metrics["residual_variance"] + metrics["bias"] ** 2
+    )
     assert metrics["r_squared_secondary_descriptive"] == pytest.approx(1.0 - 6.0 / 4.0)
 
 
@@ -153,6 +158,16 @@ def test_participant_bootstrap_is_deterministic() -> None:
 
     assert left == right
     assert left["difference_first_minus_second"] < 0.0
+
+
+def test_model_bootstrap_uses_participant_unit() -> None:
+    residuals = np.asarray([[0.0, 1.0], [0.0, 2.0], [1.0, 3.0]])
+
+    result = model_metric_bootstrap(residuals, metric="rmse", n_resamples=200, seed=42)
+
+    assert result["estimate"] == pytest.approx(np.sqrt(np.mean(residuals**2)))
+    assert result["bootstrap_unit"] == "participant"
+    assert result["ci95"][0] <= result["estimate"] <= result["ci95"][1]
 
 
 def test_parametric_refit_uses_selected_best_epoch_plus_one(
@@ -222,12 +237,38 @@ def test_completed_fold_model_is_not_overwritten(tmp_path: Path) -> None:
         0,
         config=_fast_config(),
     )
-    payload = {"completion_status": "complete", "prediction_artifact": "x.npz"}
-    fold_record = {"models": {"persistence": payload}}
+    fold_record = {"models": {}}
+
+    _run_persistence_fold(dataset, plan, tmp_path, fold_record)
+    payload = fold_record["models"]["persistence"]
+    artifact = tmp_path / payload["prediction_artifact"]
+    first_hash = sha256_file(artifact)
 
     _run_persistence_fold(dataset, plan, tmp_path, fold_record)
 
     assert fold_record["models"]["persistence"] is payload
+    assert sha256_file(artifact) == first_hash
+
+
+def test_completed_fold_model_rejects_tampered_artifact(tmp_path: Path) -> None:
+    dataset = _dataset(n_subjects=20, n_regions=2)
+    plan = make_tenfold_fold_plan(
+        build_tenfold_outer_folds(20, seed=42),
+        0,
+        config=_fast_config(),
+    )
+    fold_record = {"models": {}}
+    _run_persistence_fold(dataset, plan, tmp_path, fold_record)
+    payload = fold_record["models"]["persistence"]
+    artifact = tmp_path / payload["prediction_artifact"]
+    with np.load(artifact) as arrays:
+        modified = {name: arrays[name].copy() for name in arrays.files}
+    modified["residual"][0, 0] += 1.0
+    np.savez_compressed(artifact, **modified)
+    artifact.chmod(0o600)
+
+    with pytest.raises(SchemaError, match="hash"):
+        _run_persistence_fold(dataset, plan, tmp_path, fold_record)
 
 
 def test_aggregation_refuses_incomplete_folds(tmp_path: Path) -> None:
@@ -279,5 +320,6 @@ def test_tiny_end_to_end_tenfold_synthetic_rehearsal(
     assert freeze["fold_design"]["outer_folds"] == 10
     assert summary["completion_status"] == "complete"
     assert set(summary["overall_out_of_fold_metrics"]) == set(TENFOLD_MODELS)
+    assert set(summary["model_bootstrap_intervals"]) == set(TENFOLD_MODELS)
     assert summary["prediction_artifact_count"] == 70
     assert summary["fold_design"]["outer_fold_size_distribution"] == {"2": 10}

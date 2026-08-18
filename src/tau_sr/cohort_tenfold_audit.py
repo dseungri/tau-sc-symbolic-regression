@@ -18,6 +18,7 @@ from tau_sr.cohort_tenfold import (
     TENFOLD_SUMMARY_NAME,
     TenfoldConfig,
     all_bootstrap_comparisons,
+    all_model_bootstrap_intervals,
     assemble_out_of_fold_arrays,
     build_tenfold_outer_folds,
     overall_prediction_metrics,
@@ -60,6 +61,14 @@ def audit_tenfold_experiment(output_dir: str | Path) -> dict[str, Any]:
         _mapping(summary.get("paired_bootstrap_comparisons"), "summary bootstrap"),
         recomputed["paired_bootstrap_comparisons"],
     )
+    interval_discrepancy = _max_bootstrap_discrepancy(
+        _mapping(summary.get("model_bootstrap_intervals"), "summary model intervals"),
+        recomputed["model_bootstrap_intervals"],
+        paired=False,
+    )
+    identity_checks = _metric_identity_checks(
+        recomputed["overall_out_of_fold_metrics"],
+    )
     artifact_checks = _artifact_checks(summary, private_dir)
     privacy = _privacy_scan(summary, freeze, checkpoint)
     fold_checks = _fold_checks(summary, freeze, checkpoint)
@@ -69,6 +78,8 @@ def audit_tenfold_experiment(output_dir: str | Path) -> dict[str, Any]:
         and freeze.get("completion_status") == "frozen_before_execution"
         and metric_discrepancy <= 1e-12
         and bootstrap_discrepancy <= 1e-12
+        and interval_discrepancy <= 1e-12
+        and identity_checks["passed"]
         and artifact_checks["passed"]
         and privacy["passed"]
         and fold_checks["passed"]
@@ -80,12 +91,15 @@ def audit_tenfold_experiment(output_dir: str | Path) -> dict[str, Any]:
         "metric_reproduction": {
             "max_aggregate_metric_discrepancy": metric_discrepancy,
             "max_bootstrap_discrepancy": bootstrap_discrepancy,
+            "max_model_interval_discrepancy": interval_discrepancy,
             "tolerance": 1e-12,
         },
+        "metric_identity_checks": identity_checks,
         "fold_checks": fold_checks,
         "artifact_checks": artifact_checks,
         "privacy_scan": privacy,
         "recomputed_overall_out_of_fold_metrics": recomputed["overall_out_of_fold_metrics"],
+        "recomputed_model_bootstrap_intervals": recomputed["model_bootstrap_intervals"],
         "recomputed_paired_bootstrap_comparisons": recomputed["paired_bootstrap_comparisons"],
         "forbidden_actions_confirmed": {
             "trained_models": False,
@@ -125,6 +139,11 @@ def recompute_tenfold_summary_from_artifacts(
             for model in TENFOLD_MODELS
         },
         "paired_bootstrap_comparisons": all_bootstrap_comparisons(
+            residuals,
+            n_resamples=config.bootstrap_resamples,
+            seed=config.bootstrap_seed,
+        ),
+        "model_bootstrap_intervals": all_model_bootstrap_intervals(
             residuals,
             n_resamples=config.bootstrap_resamples,
             seed=config.bootstrap_seed,
@@ -222,6 +241,8 @@ def _max_metric_discrepancy(
 def _max_bootstrap_discrepancy(
     saved: Mapping[str, Any],
     recomputed: Mapping[str, Any],
+    *,
+    paired: bool = True,
 ) -> float:
     maximum = 0.0
     for comparison, recomputed_payload in recomputed.items():
@@ -232,16 +253,38 @@ def _max_bootstrap_discrepancy(
                 _mapping(recomputed_payload, f"recomputed {comparison}").get(metric),
                 f"recomputed {comparison}.{metric}",
             )
-            maximum = max(
-                maximum,
-                abs(
-                    float(saved_metric["difference_first_minus_second"])
-                    - float(recomputed_metric["difference_first_minus_second"])
-                ),
-            )
+            if paired:
+                maximum = max(
+                    maximum,
+                    abs(
+                        float(saved_metric["difference_first_minus_second"])
+                        - float(recomputed_metric["difference_first_minus_second"])
+                    ),
+                )
+            else:
+                maximum = max(
+                    maximum,
+                    abs(float(saved_metric["estimate"]) - float(recomputed_metric["estimate"])),
+                )
             for left, right in zip(saved_metric["ci95"], recomputed_metric["ci95"], strict=True):
                 maximum = max(maximum, abs(float(left) - float(right)))
     return maximum
+
+
+def _metric_identity_checks(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    discrepancies: dict[str, float] = {}
+    for model, payload in metrics.items():
+        row = _mapping(payload, f"{model} metrics")
+        mse = float(row["mse"])
+        variance = float(row["residual_variance"])
+        bias = float(row["bias"])
+        discrepancies[str(model)] = abs(mse - (variance + bias**2))
+    maximum = max(discrepancies.values(), default=0.0)
+    return {
+        "passed": maximum <= 1e-12,
+        "max_mse_variance_bias_discrepancy": maximum,
+        "per_model_discrepancy": discrepancies,
+    }
 
 
 def _fold_checks(

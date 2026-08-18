@@ -113,13 +113,16 @@ __all__ = (
     "TenfoldConfig",
     "TenfoldFoldPlan",
     "aggregate_tenfold_results",
+    "all_model_bootstrap_intervals",
     "build_tenfold_outer_folds",
     "execute_tenfold_analysis",
     "freeze_tenfold_protocol",
     "inner_train_validation_split",
     "load_verified_tenfold_cohort",
+    "model_metric_bootstrap",
     "paired_subject_bootstrap",
     "refit_updates_from_best_epoch",
+    "require_clean_repository",
     "run_tenfold_analysis",
     "validate_private_tenfold_output_directory",
 )
@@ -442,7 +445,6 @@ def execute_tenfold_analysis(
     )
     write_private_json(private_dir / TENFOLD_SUMMARY_NAME, summary)
     _write_tenfold_checkpoint(private_dir, expected_freeze, fold_records, "complete")
-    _write_tenfold_figures(private_dir, summary)
     return summary
 
 
@@ -511,7 +513,6 @@ def run_tenfold_analysis(
             runtime_seconds=float(checkpoint.get("runtime_seconds", 0.0)),
         )
         write_private_json(private_dir / TENFOLD_SUMMARY_NAME, summary)
-        _write_tenfold_figures(private_dir, summary)
         return summary
 
     from tau_sr.cohort_tenfold_audit import audit_tenfold_experiment
@@ -587,6 +588,11 @@ def aggregate_tenfold_results(
         seed=config.bootstrap_seed,
     )
     stability = _fold_stability(records)
+    model_intervals = all_model_bootstrap_intervals(
+        residuals,
+        n_resamples=config.bootstrap_resamples,
+        seed=config.bootstrap_seed,
+    )
     arrays = _write_final_arrays(private_path, predictions, residuals, targets)
     summary = {
         "experiment": "full_cohort_nested_tenfold_cv",
@@ -611,6 +617,7 @@ def aggregate_tenfold_results(
         "configuration": config_payload(config),
         "folds": _fold_records_without_membership(records),
         "overall_out_of_fold_metrics": overall,
+        "model_bootstrap_intervals": model_intervals,
         "fold_metric_summary": fold_metric_summary,
         "paired_bootstrap_comparisons": comparisons,
         "fold_stability": stability,
@@ -753,6 +760,59 @@ def paired_subject_bootstrap(
     }
 
 
+def model_metric_bootstrap(
+    residuals: np.ndarray,
+    *,
+    metric: Literal["rmse", "mae"],
+    n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    seed: int = 42,
+) -> dict[str, Any]:
+    values = _residual_matrix(residuals, "residuals")
+    _positive_int(n_resamples, "n_resamples")
+    _nonnegative_int(seed, "seed")
+    estimator = _pooled_rmse if metric == "rmse" else _pooled_mae
+    observed = estimator(values, np.arange(values.shape[0]))
+    rng = np.random.default_rng(seed)
+    samples = np.empty(n_resamples, dtype=float)
+    for index in range(n_resamples):
+        sampled = rng.integers(0, values.shape[0], size=values.shape[0])
+        samples[index] = estimator(values, sampled)
+    lower, upper = np.quantile(samples, [0.025, 0.975])
+    return {
+        "metric": metric,
+        "estimate": float(observed),
+        "ci95": [float(lower), float(upper)],
+        "n_resamples": int(n_resamples),
+        "seed": int(seed),
+        "bootstrap_unit": "participant",
+    }
+
+
+def all_model_bootstrap_intervals(
+    residuals: Mapping[str, np.ndarray],
+    *,
+    n_resamples: int,
+    seed: int,
+) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for model, residual in residuals.items():
+        output[model] = {
+            "rmse": model_metric_bootstrap(
+                residual,
+                metric="rmse",
+                n_resamples=n_resamples,
+                seed=seed,
+            ),
+            "mae": model_metric_bootstrap(
+                residual,
+                metric="mae",
+                n_resamples=n_resamples,
+                seed=seed,
+            ),
+        }
+    return output
+
+
 def all_bootstrap_comparisons(
     residuals: Mapping[str, np.ndarray],
     *,
@@ -806,6 +866,18 @@ def validate_private_tenfold_output_directory(
     return output
 
 
+def require_clean_repository() -> None:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        raise SchemaError("tenfold real-data stages require a clean Git worktree.")
+
+
 def config_payload(config: TenfoldConfig) -> dict[str, Any]:
     model = config.model_config
     return {
@@ -852,7 +924,7 @@ def _run_persistence_fold(
     private_dir: Path,
     fold_record: dict[str, Any],
 ) -> None:
-    if _completed_model(fold_record, "persistence"):
+    if _completed_model(fold_record, "persistence", private_dir):
         return
     start = time.perf_counter()
     forecasts = forecast_persistence(dataset, plan.outer_evaluation_indices)
@@ -873,7 +945,7 @@ def _run_ridge_fold(
     fold_record: dict[str, Any],
     config: TenfoldConfig,
 ) -> RidgeFit | None:
-    if _completed_model(fold_record, "ridge"):
+    if _completed_model(fold_record, "ridge", private_dir):
         return None
     start = time.perf_counter()
     selection = select_ridge_alpha(
@@ -918,7 +990,7 @@ def _run_parametric_fold(
     fold_record: dict[str, Any],
     config: CohortExperimentConfig,
 ) -> ParametricFitResult | None:
-    if _completed_model(fold_record, kind):
+    if _completed_model(fold_record, kind, private_dir):
         return None
     start = time.perf_counter()
     inner = _fit_parametric_inner(dataset, split, kind=kind, config=config)
@@ -1044,7 +1116,7 @@ def _run_neural_fold(
     fold_record: dict[str, Any],
     config: CohortExperimentConfig,
 ) -> ZeroAnchoredNeuralReactionDiffusion:
-    if _completed_model(fold_record, "neural"):
+    if _completed_model(fold_record, "neural", private_dir):
         return _load_neural_model_from_payload(
             fold_record["models"]["neural"],
             config,
@@ -1173,7 +1245,7 @@ def _run_symbolic_fold(
     config: TenfoldConfig,
     symbolic_runner: SymbolicRunner,
 ) -> None:
-    if _completed_model(fold_record, "symbolic"):
+    if _completed_model(fold_record, "symbolic", private_dir):
         return
     start = time.perf_counter()
     symbolic_dir = private_dir / "symbolic" / f"fold_{plan.fold_index:02d}"
@@ -1364,6 +1436,7 @@ def _freeze_payload(cohort: TenfoldCohort, config: TenfoldConfig) -> dict[str, A
                 if config.expected_subject_count == EXPECTED_SUBJECT_COUNT
                 else sorted({len(fold) for fold in folds}),
             },
+            "inner_split_fingerprints": _inner_split_fingerprints(folds, config),
             "configuration": config_payload(config),
             "metric_definitions": {
                 "residual": "predicted - observed",
@@ -1471,10 +1544,25 @@ def _load_neural_model_from_payload(
     return model
 
 
-def _completed_model(fold_record: Mapping[str, Any], model_name: str) -> bool:
+def _completed_model(
+    fold_record: Mapping[str, Any],
+    model_name: str,
+    private_dir: Path,
+) -> bool:
     models = _mapping(fold_record.get("models"), "fold models")
     payload = models.get(model_name)
-    return isinstance(payload, Mapping) and payload.get("completion_status") == "complete"
+    if not isinstance(payload, Mapping) or payload.get("completion_status") != "complete":
+        return False
+    relative = _relative_artifact_path(payload.get("prediction_artifact"))
+    artifact = private_dir / relative
+    if not artifact.exists():
+        raise SchemaError("completed model checkpoint is missing its prediction artifact.")
+    if artifact.stat().st_mode & 0o077:
+        raise SchemaError("completed model artifact permissions are not restrictive.")
+    saved_hash = payload.get("artifact_sha256")
+    if not isinstance(saved_hash, str) or sha256_file(artifact) != saved_hash:
+        raise SchemaError("completed model prediction artifact hash does not match.")
+    return True
 
 
 def _load_prediction_artifact(path: Path) -> dict[str, np.ndarray]:
@@ -1802,6 +1890,33 @@ def _fold_size_distribution(folds: Sequence[Sequence[int]]) -> dict[str, int]:
         key = str(len(fold))
         output[key] = output.get(key, 0) + 1
     return output
+
+
+def _inner_split_fingerprints(
+    folds: Sequence[Sequence[int]],
+    config: TenfoldConfig,
+) -> dict[str, Any]:
+    records: dict[str, Any] = {}
+    for fold_index in range(len(folds)):
+        plan = make_tenfold_fold_plan(folds, fold_index, config=config)
+        records[str(fold_index)] = {
+            "inner_seed": plan.inner_seed,
+            "outer_evaluation_count": len(plan.outer_evaluation_indices),
+            "outer_development_count": len(plan.outer_development_indices),
+            "inner_training_count": len(plan.inner_training_indices),
+            "inner_validation_count": len(plan.inner_validation_indices),
+            "inner_split_fingerprint": _fingerprint(
+                {
+                    "fold_index": plan.fold_index,
+                    "outer_evaluation": plan.outer_evaluation_indices,
+                    "outer_development": plan.outer_development_indices,
+                    "inner_training": plan.inner_training_indices,
+                    "inner_validation": plan.inner_validation_indices,
+                    "inner_seed": plan.inner_seed,
+                }
+            ),
+        }
+    return records
 
 
 def _fold_records_without_membership(records: Mapping[str, Any]) -> dict[str, Any]:

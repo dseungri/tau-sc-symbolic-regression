@@ -113,6 +113,8 @@ def test_tenfold_audit_recomputes_completed_artifacts(
 
     assert audit["audit_pass"] is True
     assert audit["metric_reproduction"]["max_aggregate_metric_discrepancy"] == 0.0
+    assert audit["metric_reproduction"]["max_model_interval_discrepancy"] == 0.0
+    assert audit["metric_identity_checks"]["passed"] is True
     assert audit["artifact_checks"]["artifact_count"] == 70
 
 

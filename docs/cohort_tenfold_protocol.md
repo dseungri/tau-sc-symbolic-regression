@@ -69,6 +69,18 @@ RMSE_quadratic - RMSE_linear
 
 Negative values favor the quadratic reaction. Secondary participant-level paired
 bootstrap comparisons are listed in `config/cohort_tenfold_protocol.json`.
+Participant-level bootstrap intervals are also reported for each model's overall
+RMSE and MAE. Regions are not treated as independent bootstrap units.
+
+## Reporting
+
+Aggregate tables and figures are generated only after the independent audit
+passes. The reporting layer reads completed aggregate and out-of-fold artifacts,
+refuses incomplete or unaudited experiments, and writes model-comparison,
+paired-difference, fold-stability, parameter-stability, and symbolic-stability
+outputs as PDF and 300-dpi PNG files. Figures must not include participant-level
+points, source identifiers, private paths, raw observations, predictions, or
+residual vectors.
 
 ## Privacy
 

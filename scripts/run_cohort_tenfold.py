@@ -11,7 +11,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from tau_sr.cohort_tenfold import TenfoldConfig, run_tenfold_analysis  # noqa: E402
+from tau_sr.cohort_tenfold import (  # noqa: E402
+    TenfoldConfig,
+    require_clean_repository,
+    run_tenfold_analysis,
+)
 from tau_sr.schemas import SchemaError  # noqa: E402
 
 
@@ -34,6 +38,8 @@ def main() -> int:
 
     config = TenfoldConfig(pysr_worker_timeout_seconds=args.pysr_timeout_seconds)
     try:
+        if args.freeze_only or args.execute or args.aggregate:
+            require_clean_repository()
         result = run_tenfold_analysis(
             args.structure_dir,
             args.baseline_tau_dir,
